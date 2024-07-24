@@ -52,12 +52,12 @@ public class ConcurrentConsumerExample {
             public ConsumerRecord<String, String> consume(ConsumerRecord record) throws KafkaRecordConsumerException {
                 this.consumerRecord = record;
                 log.info("Processing record with key {} partition {} on thread {}", record.key(), record.partition(), Thread.currentThread().getName());
-//                try {
-//                    int sleep = random.nextInt(100, 2000);
-//                    Thread.sleep(sleep);
-//                } catch (InterruptedException e) {
-//                    throw new KafkaRecordConsumerException(e, record);
-//                }
+                try {
+                    int sleep = random.nextInt(100, 2000);
+                    Thread.sleep(sleep);
+                } catch (InterruptedException e) {
+                    throw new KafkaRecordConsumerException(e, record);
+                }
 
                 return record;
             }
