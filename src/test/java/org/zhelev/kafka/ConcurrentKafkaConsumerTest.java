@@ -1,12 +1,9 @@
-package org.zhelev.kafka.example;
+package org.zhelev.kafka;
 
-import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.serialization.StringDeserializer;
+import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.zhelev.kafka.ConcurrentKafkaConsumer;
-import org.zhelev.kafka.ConcurrentKafkaConsumerException;
-import org.zhelev.kafka.IConcurrentKafkaConsumer;
 
 import java.time.Duration;
 import java.util.List;
@@ -17,7 +14,7 @@ import static org.apache.kafka.clients.CommonClientConfigs.BOOTSTRAP_SERVERS_CON
 import static org.apache.kafka.clients.consumer.ConsumerConfig.*;
 import static org.apache.kafka.clients.consumer.ConsumerConfig.AUTO_OFFSET_RESET_CONFIG;
 
-public class ConcurrentKafkaConsumerExample {
+public class ConcurrentKafkaConsumerTest {
 
     private static final Logger log = LoggerFactory.getLogger(ConcurrentKafkaConsumer.class);
 
@@ -45,17 +42,33 @@ public class ConcurrentKafkaConsumerExample {
     private static final Integer MAX_SLEEP_TIME = 2000;
     private static final Integer MIN_SLEEP_TIME = 100;
 
-
-    public static void main(String[] args) {
+    @Test
+    void sleepyTest() {
 
         // Sleeping record processor
         IConcurrentKafkaConsumer<String, String> recordConsumer = record -> {
             log.info("Processing record with key {} partition {} on thread {}", record.key(), record.partition(), Thread.currentThread().getName());
+            // this events takes log to process
             try {
                 Thread.sleep(new Random().nextInt(MIN_SLEEP_TIME, MAX_SLEEP_TIME));
             } catch (InterruptedException e) {
                 throw new ConcurrentKafkaConsumerException(e, record);
             }
+        };
+
+        try (ConcurrentKafkaConsumer<String, String> kafkaConcurrentConsumer = new ConcurrentKafkaConsumer<>(
+                CONSUMER_PROPS, TOPICS, POLL_DURATION, EXECUTOR_SIZE, QUEUES_PER_EXECUTOR, MAX_BATCH_SIZE, recordConsumer)) {
+            kafkaConcurrentConsumer.consume();
+        }
+    }
+
+    @Test
+    void basicTest() {
+
+        // Sleeping record processor
+        IConcurrentKafkaConsumer<String, String> recordConsumer = record -> {
+            log.info("Processing record with key {} partition {} on thread {}", record.key(), record.partition(), Thread.currentThread().getName());
+            // event processing happens here
         };
 
         try (ConcurrentKafkaConsumer<String, String> kafkaConcurrentConsumer = new ConcurrentKafkaConsumer<>(
