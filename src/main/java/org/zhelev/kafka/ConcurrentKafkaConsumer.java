@@ -11,9 +11,9 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
 
-public class ConcurrentKafkaEventConsumer<K, V> {
+public class ConcurrentKafkaConsumer<K, V> {
 
-    private static final Logger log = LoggerFactory.getLogger(ConcurrentKafkaEventConsumer.class);
+    private static final Logger log = LoggerFactory.getLogger(ConcurrentKafkaConsumer.class);
 
     public static final int TOTAL_FUTURES_THRESHOLD = 1000;
     public static final int THREADS_PER_EXECUTOR = 1; // must be 1 to keep record processing order!
@@ -22,17 +22,17 @@ public class ConcurrentKafkaEventConsumer<K, V> {
     private final KeyPartitionedExecutors keyPartitionedExecutors;
     private final Duration pollDuration;
     private final Collection<String> topics;
-    private final IKafkaRecordConsumer<K, V> recordConsumer;
+    private final IConcurrentKafkaConsumer<K, V> recordConsumer;
     private final boolean isAutoCommitEnabled;
 
-    public interface IKafkaRecordConsumer<K, V> {
-        ConsumerRecord<K, V> consume(ConsumerRecord<K, V> record) throws KafkaRecordConsumerException;
+    public interface IConcurrentKafkaConsumer<K, V> {
+        ConsumerRecord<K, V> consume(ConsumerRecord<K, V> record) throws ConcurrentKafkaConsumerException;
 
         Thread.UncaughtExceptionHandler exceptionHandler(Thread t, Throwable e);
     }
 
-    public ConcurrentKafkaEventConsumer(Properties consumerProperties, Collection<String> topics, Duration pollDuration,
-                                        Integer executorSize, Integer queueSize, IKafkaRecordConsumer<K, V> recordConsumer) {
+    public ConcurrentKafkaConsumer(Properties consumerProperties, Collection<String> topics, Duration pollDuration,
+                                   Integer executorSize, Integer queueSize, IConcurrentKafkaConsumer<K, V> recordConsumer) {
         this.consumerProperties = consumerProperties;
         this.topics = topics;
         this.pollDuration = pollDuration;
@@ -69,7 +69,7 @@ public class ConcurrentKafkaEventConsumer<K, V> {
                                 log.info("Waiting for batch to complete, futures size: {}, max queue load {}", futures.size(), maxQueueLoad);
                                 List<ConsumerRecord> processedRecords = handleBatch(partition, futures, partitionRecords, consumer);
                                 count += processedRecords.size();
-                            } catch (KafkaRecordConsumerException e) {
+                            } catch (ConcurrentKafkaConsumerException e) {
                                 log.error(e.getMessage(), e);
                                 ConsumerRecord failedRecord = e.getConsumerRecord();
                                 log.error("Failed processing record: {}", failedRecord);

@@ -4,8 +4,8 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.zhelev.kafka.ConcurrentKafkaEventConsumer;
-import org.zhelev.kafka.KafkaRecordConsumerException;
+import org.zhelev.kafka.ConcurrentKafkaConsumer;
+import org.zhelev.kafka.ConcurrentKafkaConsumerException;
 
 import java.time.Duration;
 import java.util.List;
@@ -16,9 +16,9 @@ import static org.apache.kafka.clients.CommonClientConfigs.BOOTSTRAP_SERVERS_CON
 import static org.apache.kafka.clients.consumer.ConsumerConfig.*;
 import static org.apache.kafka.clients.consumer.ConsumerConfig.AUTO_OFFSET_RESET_CONFIG;
 
-public class ConcurrentConsumerExample {
+public class ConcurrentKafkaConsumerExample {
 
-    private static final Logger log = LoggerFactory.getLogger(ConcurrentKafkaEventConsumer.class);
+    private static final Logger log = LoggerFactory.getLogger(ConcurrentKafkaConsumer.class);
 
     // Consumer config
     private static final String BOOTSTRAP_SERVERS = "192.168.1.170:29092,192.168.1.170:39092,192.168.1.170:49092";
@@ -32,7 +32,7 @@ public class ConcurrentConsumerExample {
         put(ENABLE_AUTO_COMMIT_CONFIG, "false"); // false is recommended
     }};
 
-    // ConcurrentKafkaEventConsumer class config
+    // ConcurrentKafkaConsumer class config
     private static final String TOPIC = "idmusers";
     private static final List<String> TOPICS = List.of(TOPIC);
     private static final Duration POLL_DURATION = Duration.ofMillis(100);
@@ -42,21 +42,21 @@ public class ConcurrentConsumerExample {
     public static void main(String[] args) {
 
         // Sleeping record processor
-        ConcurrentKafkaEventConsumer.IKafkaRecordConsumer<String, String> recordConsumer = new ConcurrentKafkaEventConsumer.IKafkaRecordConsumer() {
+        ConcurrentKafkaConsumer.IConcurrentKafkaConsumer<String, String> recordConsumer = new ConcurrentKafkaConsumer.IConcurrentKafkaConsumer() {
 
             private ConsumerRecord<String, String> consumerRecord;
             private Random random = new Random();
 
             // record processing happens here
             @Override
-            public ConsumerRecord<String, String> consume(ConsumerRecord record) throws KafkaRecordConsumerException {
+            public ConsumerRecord<String, String> consume(ConsumerRecord record) throws ConcurrentKafkaConsumerException {
                 this.consumerRecord = record;
                 log.info("Processing record with key {} partition {} on thread {}", record.key(), record.partition(), Thread.currentThread().getName());
                 try {
                     int sleep = random.nextInt(100, 2000);
                     Thread.sleep(sleep);
                 } catch (InterruptedException e) {
-                    throw new KafkaRecordConsumerException(e, record);
+                    throw new ConcurrentKafkaConsumerException(e, record);
                 }
 
                 return record;
@@ -65,12 +65,12 @@ public class ConcurrentConsumerExample {
             @Override
             public Thread.UncaughtExceptionHandler exceptionHandler(Thread t, Throwable e) {
                 return (throwable, exception) -> {
-                    throw new KafkaRecordConsumerException(exception.getMessage(), this.consumerRecord);
+                    throw new ConcurrentKafkaConsumerException(exception.getMessage(), this.consumerRecord);
                 };
             }
         };
 
-        ConcurrentKafkaEventConsumer<String, String> kafkaConcurrentConsumer = new ConcurrentKafkaEventConsumer<>(
+        ConcurrentKafkaConsumer<String, String> kafkaConcurrentConsumer = new ConcurrentKafkaConsumer<>(
                 CONSUMER_PROPS, TOPICS, POLL_DURATION, EXECUTOR_SIZE, QUEUES_PER_EXECUTOR, recordConsumer);
 
         kafkaConcurrentConsumer.consume();

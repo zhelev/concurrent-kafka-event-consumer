@@ -2,7 +2,7 @@ package org.zhelev.kafka;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 
-public class KafkaRecordConsumerException extends RuntimeException {
+public class ConcurrentKafkaConsumerException extends RuntimeException {
 
     public ConsumerRecord getConsumerRecord() {
         return consumerRecord;
@@ -10,17 +10,17 @@ public class KafkaRecordConsumerException extends RuntimeException {
 
     private final ConsumerRecord consumerRecord;
 
-    public KafkaRecordConsumerException(ConsumerRecord consumerRecord) {
+    public ConcurrentKafkaConsumerException(ConsumerRecord consumerRecord) {
         super();
         this.consumerRecord = consumerRecord;
     }
 
-    public KafkaRecordConsumerException(String message, ConsumerRecord consumerRecord) {
+    public ConcurrentKafkaConsumerException(String message, ConsumerRecord consumerRecord) {
         super(message);
         this.consumerRecord = consumerRecord;
     }
 
-    public KafkaRecordConsumerException(Throwable throwable, ConsumerRecord consumerRecord) {
+    public ConcurrentKafkaConsumerException(Throwable throwable, ConsumerRecord consumerRecord) {
         super(throwable);
         this.consumerRecord = consumerRecord;
     }
