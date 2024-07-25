@@ -17,6 +17,7 @@ import java.util.concurrent.ExecutorService;
 class KeyPartitionedExecutorsTest {
 
     private static final Logger log = LoggerFactory.getLogger(KeyPartitionedExecutors.class);
+    public static final int THREADS_PER_EXECUTOR = 1;
 
     private KeyPartitionedExecutors keyPartitionedExecutors;
     private int executorSize = 4;
@@ -31,17 +32,12 @@ class KeyPartitionedExecutorsTest {
 
     @BeforeEach
     void setUp() {
-        keyPartitionedExecutors = new KeyPartitionedExecutors(executorSize, 1, queueSize, threadPrefix, exceptionHandler);
+        keyPartitionedExecutors = new KeyPartitionedExecutors(executorSize, THREADS_PER_EXECUTOR, queueSize, threadPrefix, exceptionHandler);
     }
 
     @AfterEach
     void tearDown() {
         keyPartitionedExecutors.shutDown();
-    }
-
-    @Test
-    void keyPartitionedExecutors() {
-        Assertions.assertNotNull(keyPartitionedExecutors);
     }
 
     @Test

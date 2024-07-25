@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.zhelev.kafka.ConcurrentKafkaConsumer;
 import org.zhelev.kafka.ConcurrentKafkaConsumerException;
+import org.zhelev.kafka.IConcurrentKafkaConsumer;
 
 import java.time.Duration;
 import java.util.List;
@@ -36,44 +37,31 @@ public class ConcurrentKafkaConsumerExample {
     private static final String TOPIC = "idmusers";
     private static final List<String> TOPICS = List.of(TOPIC);
     private static final Duration POLL_DURATION = Duration.ofMillis(100);
-    private static final Integer EXECUTOR_SIZE = 20; // Runtime.getRuntime().availableProcessors();
-    private static final Integer QUEUES_PER_EXECUTOR = 40;
+    private static final int EXECUTOR_SIZE = 20; // Runtime.getRuntime().availableProcessors();
+    private static final int QUEUES_PER_EXECUTOR = 40;
+    private static final int MAX_BATCH_SIZE = 1000;
+
+
+    private static final Integer MAX_SLEEP_TIME = 2000;
+    private static final Integer MIN_SLEEP_TIME = 100;
+
 
     public static void main(String[] args) {
 
         // Sleeping record processor
-        ConcurrentKafkaConsumer.IConcurrentKafkaConsumer<String, String> recordConsumer = new ConcurrentKafkaConsumer.IConcurrentKafkaConsumer() {
-
-            private ConsumerRecord<String, String> consumerRecord;
-            private Random random = new Random();
-
-            // record processing happens here
-            @Override
-            public ConsumerRecord<String, String> consume(ConsumerRecord record) throws ConcurrentKafkaConsumerException {
-                this.consumerRecord = record;
-                log.info("Processing record with key {} partition {} on thread {}", record.key(), record.partition(), Thread.currentThread().getName());
-                try {
-                    int sleep = random.nextInt(100, 2000);
-                    Thread.sleep(sleep);
-                } catch (InterruptedException e) {
-                    throw new ConcurrentKafkaConsumerException(e, record);
-                }
-
-                return record;
-            }
-
-            @Override
-            public Thread.UncaughtExceptionHandler exceptionHandler(Thread t, Throwable e) {
-                return (throwable, exception) -> {
-                    throw new ConcurrentKafkaConsumerException(exception.getMessage(), this.consumerRecord);
-                };
+        IConcurrentKafkaConsumer<String, String> recordConsumer = record -> {
+            log.info("Processing record with key {} partition {} on thread {}", record.key(), record.partition(), Thread.currentThread().getName());
+            try {
+                Thread.sleep(new Random().nextInt(MIN_SLEEP_TIME, MAX_SLEEP_TIME));
+            } catch (InterruptedException e) {
+                throw new ConcurrentKafkaConsumerException(e, record);
             }
         };
 
-        ConcurrentKafkaConsumer<String, String> kafkaConcurrentConsumer = new ConcurrentKafkaConsumer<>(
-                CONSUMER_PROPS, TOPICS, POLL_DURATION, EXECUTOR_SIZE, QUEUES_PER_EXECUTOR, recordConsumer);
-
-        kafkaConcurrentConsumer.consume();
+        try (ConcurrentKafkaConsumer<String, String> kafkaConcurrentConsumer = new ConcurrentKafkaConsumer<>(
+                CONSUMER_PROPS, TOPICS, POLL_DURATION, EXECUTOR_SIZE, QUEUES_PER_EXECUTOR, MAX_BATCH_SIZE, recordConsumer)) {
+            kafkaConcurrentConsumer.consume();
+        }
     }
 
 }

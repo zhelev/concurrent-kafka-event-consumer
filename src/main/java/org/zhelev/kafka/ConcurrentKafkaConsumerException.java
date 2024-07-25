@@ -8,7 +8,7 @@ public class ConcurrentKafkaConsumerException extends RuntimeException {
         return consumerRecord;
     }
 
-    private final ConsumerRecord consumerRecord;
+    private ConsumerRecord consumerRecord;
 
     public ConcurrentKafkaConsumerException(ConsumerRecord consumerRecord) {
         super();
@@ -23,6 +23,10 @@ public class ConcurrentKafkaConsumerException extends RuntimeException {
     public ConcurrentKafkaConsumerException(Throwable throwable, ConsumerRecord consumerRecord) {
         super(throwable);
         this.consumerRecord = consumerRecord;
+    }
+
+    public ConcurrentKafkaConsumerException(String message, Throwable e) {
+        super(message, e);
     }
 
 }

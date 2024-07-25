@@ -5,17 +5,18 @@ import org.apache.kafka.common.TopicPartition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.Closeable;
+import java.io.IOException;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
 
-public class ConcurrentKafkaConsumer<K, V> {
+public class ConcurrentKafkaConsumer<K, V>  implements Closeable {
 
     private static final Logger log = LoggerFactory.getLogger(ConcurrentKafkaConsumer.class);
 
-    public static final int TOTAL_FUTURES_THRESHOLD = 1000;
     public static final int THREADS_PER_EXECUTOR = 1; // must be 1 to keep record processing order!
 
     private final Properties consumerProperties;
@@ -24,21 +25,22 @@ public class ConcurrentKafkaConsumer<K, V> {
     private final Collection<String> topics;
     private final IConcurrentKafkaConsumer<K, V> recordConsumer;
     private final boolean isAutoCommitEnabled;
+    private final int maxBatchSize;
 
-    public interface IConcurrentKafkaConsumer<K, V> {
-        ConsumerRecord<K, V> consume(ConsumerRecord<K, V> record) throws ConcurrentKafkaConsumerException;
-
-        Thread.UncaughtExceptionHandler exceptionHandler(Thread t, Throwable e);
-    }
+    // may be use ThreadLocal or scoped variables to handle errors
+    private Thread.UncaughtExceptionHandler DEFAULT_EXCEPTION_HANDLER = (t, e) -> {
+        throw new ConcurrentKafkaConsumerException("Error in Thread: "+t.getName(), e);
+    };
 
     public ConcurrentKafkaConsumer(Properties consumerProperties, Collection<String> topics, Duration pollDuration,
-                                   Integer executorSize, Integer queueSize, IConcurrentKafkaConsumer<K, V> recordConsumer) {
+                                   Integer executorSize, Integer queueSize, Integer maxBatchSize, IConcurrentKafkaConsumer<K, V> recordConsumer) {
         this.consumerProperties = consumerProperties;
         this.topics = topics;
         this.pollDuration = pollDuration;
         this.recordConsumer = recordConsumer;
+        this.maxBatchSize = maxBatchSize<1?executorSize:maxBatchSize;
         keyPartitionedExecutors = new KeyPartitionedExecutors(executorSize, THREADS_PER_EXECUTOR, queueSize,
-                String.join("|", topics), recordConsumer::exceptionHandler);
+                String.join("|", topics), DEFAULT_EXCEPTION_HANDLER);
 
         this.isAutoCommitEnabled = this.consumerProperties.getProperty("enable.auto.commit", "false").equals("true");
         if (isAutoCommitEnabled) {
@@ -49,7 +51,7 @@ public class ConcurrentKafkaConsumer<K, V> {
     public void consume() {
         try (final Consumer<K, V> consumer = new KafkaConsumer<>(consumerProperties)) {
             consumer.subscribe(topics);
-            long count = 0;
+            long count = 0; // used for testing
             while (!Thread.currentThread().isInterrupted()) {
 
                 Vector<CompletableFuture> futures = new Vector<>();
@@ -64,7 +66,7 @@ public class ConcurrentKafkaConsumer<K, V> {
                         // use batching, block and process, do not overwhelm the backend
                         // do not push too much so if a record fails you will not have to replay multiple records
                         float maxQueueLoad = this.keyPartitionedExecutors.getMaxQueueLoad();
-                        if (futures.size() >= TOTAL_FUTURES_THRESHOLD || maxQueueLoad >= 0.75) {
+                        if (futures.size() >= this.maxBatchSize || maxQueueLoad >= 0.75) {
                             try {
                                 log.info("Waiting for batch to complete, futures size: {}, max queue load {}", futures.size(), maxQueueLoad);
                                 List<ConsumerRecord> processedRecords = handleBatch(partition, futures, partitionRecords, consumer);
@@ -123,6 +125,11 @@ public class ConcurrentKafkaConsumer<K, V> {
     private CompletableFuture<Void> processRecord(ConsumerRecord<K, V> kafkaRecord) {
         ExecutorService recordExecutor = keyPartitionedExecutors.getExecutorForKey(kafkaRecord.key());
         return CompletableFuture.runAsync(() -> recordConsumer.consume(kafkaRecord), recordExecutor);
+    }
+
+    @Override
+    public void close(){
+        keyPartitionedExecutors.close();
     }
 
 }
