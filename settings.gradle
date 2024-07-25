@@ -1,2 +1,2 @@
-rootProject.name = 'kafka-dev'
+rootProject.name = 'concurrent-kafka-event-consumer'
 
