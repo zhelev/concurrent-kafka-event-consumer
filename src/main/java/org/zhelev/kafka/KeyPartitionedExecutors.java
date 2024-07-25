@@ -19,14 +19,19 @@ public class KeyPartitionedExecutors {
 
     private final int executorSize;
 
+    private final int threadsPerExecutor;
+
     private final int queueSize;
 
     private final String threadPrefix;
+
     private final Thread.UncaughtExceptionHandler exceptionHandler;
 
-    public KeyPartitionedExecutors(int executorSize, int queueSize, String threadPrefix, Thread.UncaughtExceptionHandler exceptionHandler) {
-        this.executorSize = executorSize;
-        this.queueSize = queueSize;
+    public KeyPartitionedExecutors(int executorCount, int threadsPerExecutor, int executorQueueSize,
+                                   String threadPrefix, Thread.UncaughtExceptionHandler exceptionHandler) {
+        this.executorSize = executorCount;
+        this.threadsPerExecutor = threadsPerExecutor;
+        this.queueSize = executorQueueSize;
         this.threadPrefix = threadPrefix;
         this.exceptionHandler = exceptionHandler;
         initExecutors();
@@ -49,7 +54,6 @@ public class KeyPartitionedExecutors {
         return threadFactory;
     }
 
-
     public int getExecutorSize() {
         return executorSize;
     }
@@ -58,18 +62,23 @@ public class KeyPartitionedExecutors {
         return queueSize;
     }
 
-    private ThreadPoolExecutor createSingleThreadPoolExecutor(int index) {
+    public int getThreadsPerExecutor() {
+        return threadsPerExecutor;
+    }
+
+    private ThreadPoolExecutor createThreadPoolExecutor(int index) {
         final LinkedBlockingQueue<Runnable> queue = new LinkedBlockingQueue<>(this.queueSize);
 
         final String prefix = String.format(threadPrefix + "-part(%03d/%03d)[%03d]-", index, this.executorSize, this.queueSize);
         final ThreadFactory threadFactory = newThreadFactory(prefix, "%01d", this.exceptionHandler);
         final ThreadPoolExecutor threadedExecutor =
-                new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS, queue, threadFactory);
+                new ThreadPoolExecutor(this.threadsPerExecutor, this.threadsPerExecutor,
+                        0L, TimeUnit.MILLISECONDS, queue, threadFactory);
         return threadedExecutor;
     }
 
     public List<Float> getQueueLoads() {
-        return this.executors.stream().map(executor -> ((float)executor.getQueue().size()/this.queueSize)).collect(Collectors.toList());
+        return this.executors.stream().map(executor -> ((float) executor.getQueue().size() / this.queueSize)).collect(Collectors.toList());
     }
 
     public Float getMaxQueueLoad() {
@@ -86,7 +95,7 @@ public class KeyPartitionedExecutors {
 
     private void initExecutors() {
         for (int i = 0; i < executorSize; i++) {
-            final ThreadPoolExecutor threadedExecutor = createSingleThreadPoolExecutor(i);
+            final ThreadPoolExecutor threadedExecutor = createThreadPoolExecutor(i);
             this.executors.add(threadedExecutor);
         }
     }

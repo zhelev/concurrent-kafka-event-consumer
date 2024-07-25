@@ -19,7 +19,7 @@ class KeyPartitionedExecutorsTest {
     private static final Logger log = LoggerFactory.getLogger(KeyPartitionedExecutors.class);
 
     private KeyPartitionedExecutors keyPartitionedExecutors;
-    private int executorSize = 10;
+    private int executorSize = 4;
     private int queueSize = 10;
     private String threadPrefix = "my-exec";
 
@@ -31,7 +31,7 @@ class KeyPartitionedExecutorsTest {
 
     @BeforeEach
     void setUp() {
-        keyPartitionedExecutors = new KeyPartitionedExecutors(executorSize, queueSize, threadPrefix, exceptionHandler);
+        keyPartitionedExecutors = new KeyPartitionedExecutors(executorSize, 1, queueSize, threadPrefix, exceptionHandler);
     }
 
     @AfterEach

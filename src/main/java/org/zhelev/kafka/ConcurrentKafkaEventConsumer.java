@@ -16,6 +16,7 @@ public class ConcurrentKafkaEventConsumer<K, V> {
     private static final Logger log = LoggerFactory.getLogger(ConcurrentKafkaEventConsumer.class);
 
     public static final int TOTAL_FUTURES_THRESHOLD = 1000;
+    public static final int THREADS_PER_EXECUTOR = 1; // must be 1 to keep record processing order!
 
     private final Properties consumerProperties;
     private final KeyPartitionedExecutors keyPartitionedExecutors;
@@ -36,8 +37,8 @@ public class ConcurrentKafkaEventConsumer<K, V> {
         this.topics = topics;
         this.pollDuration = pollDuration;
         this.recordConsumer = recordConsumer;
-        keyPartitionedExecutors = new KeyPartitionedExecutors(executorSize, queueSize, String.join("|", topics)
-                , recordConsumer::exceptionHandler);
+        keyPartitionedExecutors = new KeyPartitionedExecutors(executorSize, THREADS_PER_EXECUTOR, queueSize,
+                String.join("|", topics), recordConsumer::exceptionHandler);
 
         this.isAutoCommitEnabled = this.consumerProperties.getProperty("enable.auto.commit", "false").equals("true");
         if (isAutoCommitEnabled) {
@@ -92,7 +93,7 @@ public class ConcurrentKafkaEventConsumer<K, V> {
     }
 
     private <K, V> List<ConsumerRecord> handleBatch(TopicPartition partition, Vector<CompletableFuture> futures,
-                                                           List<ConsumerRecord<K, V>> partitionRecords, Consumer<K, V> consumer) {
+                                                    List<ConsumerRecord<K, V>> partitionRecords, Consumer<K, V> consumer) {
         List<ConsumerRecord> processedRecords = new ArrayList<>();
         if (futures.size() > 0) {
             processedRecords = processConsumerRecordsBatch(futures);
@@ -110,11 +111,11 @@ public class ConcurrentKafkaEventConsumer<K, V> {
 
     private <K, V> void commitPartitionOffset(TopicPartition partition, List<ConsumerRecord<K, V>> partitionRecords, Consumer<K, V> consumer) {
         // use partitionRecords, the processedRecords are not ordered
-        if(!this.isAutoCommitEnabled) {
-            long lastOffset = partitionRecords.get(partitionRecords.size() - 1).offset();
-            consumer.commitSync(Collections.singletonMap(partition, new OffsetAndMetadata(lastOffset + 1)));
-            log.info("Setting partition: {} to offset: {} ", partition, lastOffset + 1);
-        }else{
+        if (!this.isAutoCommitEnabled) {
+            long lastOffset = partitionRecords.get(partitionRecords.size() - THREADS_PER_EXECUTOR).offset();
+            consumer.commitSync(Collections.singletonMap(partition, new OffsetAndMetadata(lastOffset + THREADS_PER_EXECUTOR)));
+            log.info("Setting partition: {} to offset: {} ", partition, lastOffset + THREADS_PER_EXECUTOR);
+        } else {
             log.trace("Messages will be auto commited");
         }
     }
