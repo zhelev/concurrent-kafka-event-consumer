@@ -1,5 +1,6 @@
 package org.zhelev.kafka;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -13,7 +14,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
-public class KeyPartitionedExecutors {
+import java.io.Closeable;
+
+public class KeyPartitionedExecutors implements Closeable{
 
     private final List<ThreadPoolExecutor> executors = new ArrayList<>();
 
@@ -126,4 +129,8 @@ public class KeyPartitionedExecutors {
         });
     }
 
+    @Override
+    public void close() throws IOException {
+        shutDown();
+    }
 }
