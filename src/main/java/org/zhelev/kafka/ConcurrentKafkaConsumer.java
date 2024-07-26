@@ -5,15 +5,13 @@ import org.apache.kafka.common.TopicPartition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.Closeable;
-import java.io.IOException;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
 
-public class ConcurrentKafkaConsumer<K, V>  implements Closeable {
+public class ConcurrentKafkaConsumer<K, V>  implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(ConcurrentKafkaConsumer.class);
 
