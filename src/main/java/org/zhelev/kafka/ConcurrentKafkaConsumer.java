@@ -8,126 +8,129 @@ import org.slf4j.LoggerFactory;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
-public class ConcurrentKafkaConsumer<K, V>  implements AutoCloseable {
+public class ConcurrentKafkaConsumer<K, V> implements AutoCloseable, ConsumerRebalanceListener {
 
     private static final Logger log = LoggerFactory.getLogger(ConcurrentKafkaConsumer.class);
 
-    public static final int THREADS_PER_EXECUTOR = 1; // must be 1 to keep record processing order!
-
     private final Properties consumerProperties;
-    private final KeyPartitionedExecutors keyPartitionedExecutors;
     private final Duration pollDuration;
-    private final Collection<String> topics;
-    private final IConcurrentKafkaConsumer<K, V> recordConsumer;
-    private final boolean isAutoCommitEnabled;
-    private final int maxBatchSize;
+    private final Map<String, ConcurrentPartitionConsumerConfig> concurrentPartitionConsumerConfigs;
+    private final Boolean isAutoCommitEnabled;
+    private ExecutorService executorService;
+    private ConcurrentHashMap<String, ConcurrentPartitionConsumer> partitionConsumers;
 
-    // may be use ThreadLocal or scoped variables to handle errors
-    private Thread.UncaughtExceptionHandler DEFAULT_EXCEPTION_HANDLER = (t, e) -> {
-        throw new ConcurrentKafkaConsumerException("Error in Thread: "+t.getName(), e);
-    };
-
-    public ConcurrentKafkaConsumer(Properties consumerProperties, Collection<String> topics, Duration pollDuration,
-                                   Integer executorSize, Integer queueSize, Integer maxBatchSize, IConcurrentKafkaConsumer<K, V> recordConsumer) {
+    public ConcurrentKafkaConsumer(Properties consumerProperties, Duration pollDuration,
+                                   Map<String, ConcurrentPartitionConsumerConfig> concurrentPartitionConsumerConfigs) {
         this.consumerProperties = consumerProperties;
-        this.topics = topics;
         this.pollDuration = pollDuration;
-        this.recordConsumer = recordConsumer;
-        this.maxBatchSize = maxBatchSize<1?executorSize:maxBatchSize;
-        keyPartitionedExecutors = new KeyPartitionedExecutors(executorSize, THREADS_PER_EXECUTOR, queueSize,
-                String.join("|", topics), DEFAULT_EXCEPTION_HANDLER);
+        this.concurrentPartitionConsumerConfigs = concurrentPartitionConsumerConfigs;
 
         this.isAutoCommitEnabled = this.consumerProperties.getProperty("enable.auto.commit", "false").equals("true");
         if (isAutoCommitEnabled) {
             log.warn("Using 'enable.auto.commit=true' is not recommended when processing records concurrently.");
         }
+        this.executorService = Executors.newCachedThreadPool();
     }
+
 
     public void consume() {
         try (final Consumer<K, V> consumer = new KafkaConsumer<>(consumerProperties)) {
-            consumer.subscribe(topics);
-            long count = 0; // used for testing
-            while (!Thread.currentThread().isInterrupted()) {
 
-                Vector<CompletableFuture> futures = new Vector<>();
+            consumer.subscribe(this.concurrentPartitionConsumerConfigs.keySet(), this);
+
+            while (!Thread.currentThread().isInterrupted()) {
                 ConsumerRecords<K, V> records = consumer.poll(pollDuration);
+
                 for (TopicPartition partition : records.partitions()) {
 
                     List<ConsumerRecord<K, V>> partitionRecords = records.records(partition);
-                    for (ConsumerRecord<K, V> record : partitionRecords) {
-                        CompletableFuture<Void> future = processRecord(record);
-                        futures.add(future);
 
-                        // use batching, block and process, do not overwhelm the backend
-                        // do not push too much so if a record fails you will not have to replay multiple records
-                        float maxQueueLoad = this.keyPartitionedExecutors.getMaxQueueLoad();
-                        if (futures.size() >= this.maxBatchSize || maxQueueLoad >= 0.75) {
-                            try {
-                                log.info("Waiting for batch to complete, futures size: {}, max queue load {}", futures.size(), maxQueueLoad);
-                                List<ConsumerRecord> processedRecords = handleBatch(partition, futures, partitionRecords, consumer);
-                                count += processedRecords.size();
-                            } catch (ConcurrentKafkaConsumerException e) {
-                                log.error(e.getMessage(), e);
-                                ConsumerRecord failedRecord = e.getConsumerRecord();
-                                log.error("Failed processing record: {}", failedRecord);
-                                Thread.currentThread().interrupt(); //  "at-least-once" delivery
-                                throw e;
-                            } catch (Exception e) {
-                                log.error(e.getMessage(), e);
-                                Thread.currentThread().interrupt(); //  "at-least-once" delivery
-                                throw e;
+                    ConcurrentPartitionConsumerConfig partitionConsumerConfig = concurrentPartitionConsumerConfigs.get(partition.topic());
+
+                    final String partitionKey = ConcurrentPartitionConsumer.getPartitionKey(partition);
+                    final ConcurrentPartitionConsumer concurrentPartitionConsumer = getConcurrentPartitionConsumer(partition, partitionKey, consumer);
+
+                    CompletableFuture.runAsync(() -> {
+                                try {
+                                    Thread.currentThread().setName("cpc-" + partitionKey);
+                                    concurrentPartitionConsumer.consume(partitionRecords, this.isAutoCommitEnabled);
+                                } catch (Exception ex) {
+                                    log.error(ex.getMessage(), ex);
+                                    try {
+                                        partitionConsumers.remove(partitionKey);
+                                        concurrentPartitionConsumer.close();
+                                    } catch (Exception e) {
+                                        log.warn(ex.getMessage(), e);
+                                    }
+                                } finally {
+                                    Thread.currentThread().setName("cpc-free-thread-" + Thread.currentThread().getId());
+                                }
                             }
-                        }
-                    }
+                            ,
+                            executorService
+                    );
 
-                    List<ConsumerRecord> processedRecords = handleBatch(partition, futures, partitionRecords, consumer);
-                    count += processedRecords.size();
-                    log.info("Processed so far {} ", count);
                 }
-
             }
         }
     }
 
-    private <K, V> List<ConsumerRecord> handleBatch(TopicPartition partition, Vector<CompletableFuture> futures,
-                                                    List<ConsumerRecord<K, V>> partitionRecords, Consumer<K, V> consumer) {
-        List<ConsumerRecord> processedRecords = new ArrayList<>();
-        if (futures.size() > 0) {
-            processedRecords = processConsumerRecordsBatch(futures);
-            commitPartitionOffset(partition, partitionRecords, consumer);
-            log.info("Processed record batch of size: {}", processedRecords.size());
-            futures.clear();
+    private ConcurrentPartitionConsumer getConcurrentPartitionConsumer(TopicPartition partition, String partitionKey, Consumer<K, V> consumer) {
+        ConcurrentPartitionConsumer concurrentPartitionConsumer = partitionConsumers.get(partitionKey);
+        if (concurrentPartitionConsumer == null) {
+            concurrentPartitionConsumer = new ConcurrentPartitionConsumer<K, V>(consumer, partition, this.concurrentPartitionConsumerConfigs.get(partition.topic()));
+            partitionConsumers.put(partitionKey, concurrentPartitionConsumer);
         }
-        return processedRecords;
-    }
-
-    private static <K, V> List<ConsumerRecord> processConsumerRecordsBatch(Vector<CompletableFuture> futures) {
-        return futures.stream().map(CompletableFuture<ConsumerRecord<K, V>>::join)
-                .collect(Collectors.toList());
-    }
-
-    private <K, V> void commitPartitionOffset(TopicPartition partition, List<ConsumerRecord<K, V>> partitionRecords, Consumer<K, V> consumer) {
-        // use partitionRecords, the processedRecords are not ordered
-        if (!this.isAutoCommitEnabled) {
-            long lastOffset = partitionRecords.get(partitionRecords.size() - THREADS_PER_EXECUTOR).offset();
-            consumer.commitSync(Collections.singletonMap(partition, new OffsetAndMetadata(lastOffset + THREADS_PER_EXECUTOR)));
-            log.info("Setting partition: {} to offset: {} ", partition, lastOffset + THREADS_PER_EXECUTOR);
-        } else {
-            log.trace("Messages will be auto commited");
-        }
-    }
-
-    private CompletableFuture<Void> processRecord(ConsumerRecord<K, V> kafkaRecord) {
-        ExecutorService recordExecutor = keyPartitionedExecutors.getExecutorForKey(kafkaRecord.key());
-        return CompletableFuture.runAsync(() -> recordConsumer.consume(kafkaRecord), recordExecutor);
+        return concurrentPartitionConsumer;
     }
 
     @Override
-    public void close(){
-        keyPartitionedExecutors.close();
+    public void close() throws Exception {
+        this.partitionConsumers.forEach((k, v) -> {
+            log.warn("Closing consumer for partition {}", k);
+            try {
+                v.close();
+            } catch (Exception e) {
+                log.error(e.getMessage(), e);
+            }
+        });
+        this.executorService.shutdownNow();
     }
 
+    @Override
+    public void onPartitionsRevoked(Collection<TopicPartition> collection) {
+        disconnectPartitionHandlers(collection);
+    }
+
+    private void disconnectPartitionHandlers(Collection<TopicPartition> collection) {
+        collection.forEach(k -> {
+            String partitionKey = ConcurrentPartitionConsumer.getPartitionKey(k);
+            ConcurrentPartitionConsumer cpc = partitionConsumers.get(partitionKey);
+            if (cpc != null) {
+                partitionConsumers.remove(partitionKey);
+                try {
+                    cpc.close();
+                } catch (Exception e) {
+                    log.error(e.getMessage(), e);
+                }
+            }
+
+        });
+    }
+
+    @Override
+    public void onPartitionsAssigned(Collection<TopicPartition> collection) {
+        log.warn("Got assigned some new partitions: {}", collection);
+    }
+
+    @Override
+    public void onPartitionsLost(Collection<TopicPartition> partitions) {
+        disconnectPartitionHandlers(partitions);
+        ConsumerRebalanceListener.super.onPartitionsLost(partitions);
+    }
 }

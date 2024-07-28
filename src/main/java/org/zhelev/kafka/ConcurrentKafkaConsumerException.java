@@ -25,8 +25,4 @@ public class ConcurrentKafkaConsumerException extends RuntimeException {
         this.consumerRecord = consumerRecord;
     }
 
-    public ConcurrentKafkaConsumerException(String message, Throwable e) {
-        super(message, e);
-    }
-
 }

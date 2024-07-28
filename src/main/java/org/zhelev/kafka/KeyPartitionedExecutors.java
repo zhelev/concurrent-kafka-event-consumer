@@ -121,7 +121,7 @@ public class KeyPartitionedExecutors implements AutoCloseable{
 
     public void shutDown() {
         executors.forEach(executor -> {
-            if (executor.isShutdown()) {
+            if (!executor.isShutdown()) {
                 executor.shutdown();
             }
         });
