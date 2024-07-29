@@ -70,8 +70,8 @@ public class KeyPartitionedExecutors implements AutoCloseable{
     private ThreadPoolExecutor createThreadPoolExecutor(int index) {
         final LinkedBlockingQueue<Runnable> queue = new LinkedBlockingQueue<>(this.queueSize);
 
-        final String prefix = String.format(threadPrefix + "-part(%03d/%03d)[%03d]-", index, this.executorSize, this.queueSize);
-        final ThreadFactory threadFactory = newThreadFactory(prefix, "%01d", this.exceptionHandler);
+        final String prefix = String.format(threadPrefix + "-p(%03d/%03d)q[%03d])", index, this.executorSize, this.queueSize);
+        final ThreadFactory threadFactory = newThreadFactory(prefix, "-t%01d", this.exceptionHandler);
         final ThreadPoolExecutor threadedExecutor =
                 new ThreadPoolExecutor(this.threadsPerExecutor, this.threadsPerExecutor,
                         0L, TimeUnit.MILLISECONDS, queue, threadFactory);
