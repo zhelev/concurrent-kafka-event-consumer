@@ -81,7 +81,7 @@ public class ConcurrentKafkaConsumer<K, V> implements AutoCloseable, ConsumerReb
 
                 if (totalRecords > 0) {
                     long duration = System.nanoTime() - start;
-                    log.info("Processing {} records took {} ms", totalRecords, TimeUnit.NANOSECONDS.toMillis(duration));
+                    log.debug("Processing {} records took {} ms", totalRecords, TimeUnit.NANOSECONDS.toMillis(duration));
                 }
             }
         }
