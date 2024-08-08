@@ -2,6 +2,8 @@
 
 !! WORK IN PROGRESS !!
 
+!! LAST CHANGES ARE UNTESTED !!
+
 This project demonstrates how to create a concurrent Apache Kafka consumer.
 Using a concurrent Kafka event consumer is not recommended.
 Please check other options first - more partitions, better batching, and so on.
