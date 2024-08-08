@@ -33,7 +33,7 @@ public class KeyPartitionedExecutors implements AutoCloseable {
 
     private final int threadsPerExecutor;
 
-    private final int queueSize;
+    private final int executorsQueueSize;
 
     private final String threadPrefix;
 
@@ -43,17 +43,17 @@ public class KeyPartitionedExecutors implements AutoCloseable {
      * Creates a new instance of the KeyPartitionedExecutors class with the specified number of executors,
      * threads per executor, queue size, and thread prefix.
      *
-     * @param executorCount The number of executors to create
+     * @param executorCount      The number of executors to create
      * @param threadsPerExecutor The number of threads per executor
-     * @param executorQueueSize The size of the queue for each executor
-     * @param threadPrefix A prefix to use when naming threads
-     * @param exceptionHandler UncaughtExceptionHandler used for all threads
+     * @param executorQueueSize  The size of the queue for each executor
+     * @param threadPrefix       A prefix to use when naming threads
+     * @param exceptionHandler   UncaughtExceptionHandler used for all threads
      */
     public KeyPartitionedExecutors(int executorCount, int threadsPerExecutor, int executorQueueSize,
                                    String threadPrefix, Thread.UncaughtExceptionHandler exceptionHandler) {
         this.executorSize = executorCount;
         this.threadsPerExecutor = threadsPerExecutor;
-        this.queueSize = executorQueueSize;
+        this.executorsQueueSize = executorQueueSize;
         this.threadPrefix = threadPrefix;
         this.exceptionHandler = exceptionHandler;
 
@@ -62,7 +62,7 @@ public class KeyPartitionedExecutors implements AutoCloseable {
 
     /**
      * Initializes the thread pool executors with the specified number of threads and queue sizes.
-     *
+     * <p>
      * This method creates a new instance of each executor, initializes it with the given parameters,
      * and adds it to the list of executors managed by this class.
      *
@@ -79,8 +79,8 @@ public class KeyPartitionedExecutors implements AutoCloseable {
     /**
      * Creates and returns a new ThreadFactory instance that names threads with a given prefix and index format.
      *
-     * @param prefix The prefix to use when naming threads
-     * @param idxFormat A format string used to generate thread names, where {0} will be replaced with the thread index
+     * @param prefix           The prefix to use when naming threads
+     * @param idxFormat        A format string used to generate thread names, where {0} will be replaced with the thread index
      * @param exceptionHandler An uncaught exception handler to set for each thread created by this factory
      * @return A new ThreadFactory instance
      */
@@ -107,9 +107,9 @@ public class KeyPartitionedExecutors implements AutoCloseable {
      * @return A new ThreadPoolExecutor instance
      */
     private ThreadPoolExecutor createThreadPoolExecutor(int index) {
-        final LinkedBlockingQueue<Runnable> queue = new LinkedBlockingQueue<>(this.queueSize);
+        final LinkedBlockingQueue<Runnable> queue = new LinkedBlockingQueue<>(this.executorsQueueSize);
 
-        final String prefix = String.format(threadPrefix + "-p(%03d/%03d)q[%03d])", index, this.executorSize, this.queueSize);
+        final String prefix = String.format(threadPrefix + "-p(%03d/%03d)q[%03d])", index, this.executorSize, this.executorsQueueSize);
         final ThreadFactory threadFactory = newThreadFactory(prefix, "-t%01d", this.exceptionHandler);
         return new ThreadPoolExecutor(this.threadsPerExecutor, this.threadsPerExecutor,
                 KEEP_ALIVE_TIME, TimeUnit.MILLISECONDS, queue, threadFactory);
@@ -125,13 +125,12 @@ public class KeyPartitionedExecutors implements AutoCloseable {
     }
 
     /**
-     * Returns the size of the queue for a given executor.
+     * Returns the queue size of the executors.
      *
-     * @param key A key to use when determining which executor to query
-     * @return The size of the queue for the specified executor
+     * @return The size of the queue for used by all executors
      */
-    public int getQueueSize() {
-        return queueSize;
+    public int getExecutorsQueueSize() {
+        return executorsQueueSize;
     }
 
     /**
@@ -149,7 +148,18 @@ public class KeyPartitionedExecutors implements AutoCloseable {
      * @return A list of float values representing the queue loads
      */
     public List<Float> getQueueLoads() {
-        return this.executors.stream().map(executor -> ((float) executor.getQueue().size() / this.queueSize)).collect(Collectors.toList());
+        return this.executors.stream().map(executor -> ((float) executor.getQueue().size() / this.executorsQueueSize)).collect(Collectors.toList());
+    }
+
+    /**
+     * Checks if any of the executors' queues are full.
+     *
+     * This method checks each executor's queue size and returns true if any of them match the current maximum queue size.
+     *
+     * @return true if any executor's queue is full, false otherwise
+     */
+    public Boolean isAnyExecutorQueueFull() {
+        return this.executors.stream().anyMatch(executor -> this.executorsQueueSize == executor.getQueue().size());
     }
 
     /**
@@ -195,7 +205,7 @@ public class KeyPartitionedExecutors implements AutoCloseable {
 
     /**
      * Returns an executor service instance associated with a given key.
-     *
+     * <p>
      * The returned executor service is responsible for managing threads and queues for tasks submitted to it.
      * The choice of which executor service to return depends on the provided key, which is used to determine
      * the index of the desired executor in the list of executors managed by this class.
