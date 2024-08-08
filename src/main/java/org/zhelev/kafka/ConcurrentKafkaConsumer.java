@@ -16,13 +16,13 @@ public class ConcurrentKafkaConsumer<K, V> implements AutoCloseable, ConsumerReb
 
     private final Properties consumerProperties;
     private final Duration pollDuration;
-    private final Map<String, ConcurrentPartitionConsumerConfig> concurrentPartitionConsumerConfigs;
+    private final Map<String, ConcurrentPartitionConsumerConfig<K, V>> concurrentPartitionConsumerConfigs;
     private final Boolean isAutoCommitEnabled;
     private final ExecutorService executorService;
-    private final ConcurrentHashMap<String, ConcurrentPartitionConsumer> partitionConsumers;
+    private final ConcurrentHashMap<String, ConcurrentPartitionConsumer<K, V>> partitionConsumers;
 
     public ConcurrentKafkaConsumer(Properties consumerProperties, Duration pollDuration,
-                                   Map<String, ConcurrentPartitionConsumerConfig> concurrentPartitionConsumerConfigs) {
+                                   Map<String, ConcurrentPartitionConsumerConfig<K, V>> concurrentPartitionConsumerConfigs) {
         this.consumerProperties = consumerProperties;
         this.pollDuration = pollDuration;
         this.concurrentPartitionConsumerConfigs = concurrentPartitionConsumerConfigs;
@@ -52,12 +52,19 @@ public class ConcurrentKafkaConsumer<K, V> implements AutoCloseable, ConsumerReb
                     List<ConsumerRecord<K, V>> partitionRecords = records.records(partition);
 
                     final String partitionKey = ConcurrentPartitionConsumer.getPartitionKey(partition);
-                    final ConcurrentPartitionConsumer concurrentPartitionConsumer = getConcurrentPartitionConsumer(partition, partitionKey, consumer);
+                    final ConcurrentPartitionConsumer<K, V> concurrentPartitionConsumer = getConcurrentPartitionConsumer(partition, partitionKey, consumer);
 
                     CompletableFuture<List<ConsumerRecord<K, V>>> future = CompletableFuture.supplyAsync(() -> {
                                 try {
                                     Thread.currentThread().setName("cpc-" + partitionKey);
                                     return concurrentPartitionConsumer.consume(partitionRecords);
+                                } catch (ConcurrentPartitionConsumerException cpex) {
+                                    log.error(cpex.getMessage(), cpex);
+                                    log.error("Error processing record {}", cpex.getFailedRecord());
+                                    log.error("Successfully processed records in this batch {}", cpex.getProcessedRecords());
+                                    log.error("Failed partition is {}", cpex.getTopicPartition().topic() + " " + cpex.getTopicPartition().partition());
+                                    log.error("Failed partition records count: {}", (partitionRecords.size() - cpex.getProcessedRecords().size()));
+                                    throw cpex;
                                 } catch (Exception ex) {
                                     log.error(ex.getMessage(), ex);
                                     try {
@@ -105,7 +112,7 @@ public class ConcurrentKafkaConsumer<K, V> implements AutoCloseable, ConsumerReb
             consumer.commitAsync(
                     Collections.singletonMap(topicPartition, new OffsetAndMetadata(lastOffset + 1)),
                     (commit, err) -> {
-                        String messsage = "commit " + commit + ", last offset " + lastOffset + ", records count "+partitionRecords.size();
+                        String messsage = "commit " + commit + ", last offset " + lastOffset + ", records count " + partitionRecords.size();
                         if (err == null) {
                             log.debug("Successfully commited => {}", messsage);
                         } else {
@@ -120,8 +127,8 @@ public class ConcurrentKafkaConsumer<K, V> implements AutoCloseable, ConsumerReb
     }
 
 
-    private ConcurrentPartitionConsumer getConcurrentPartitionConsumer(TopicPartition partition, String partitionKey, Consumer<K, V> consumer) {
-        ConcurrentPartitionConsumer concurrentPartitionConsumer = partitionConsumers.get(partitionKey);
+    private ConcurrentPartitionConsumer<K, V> getConcurrentPartitionConsumer(TopicPartition partition, String partitionKey, Consumer<K, V> consumer) {
+        ConcurrentPartitionConsumer<K, V> concurrentPartitionConsumer = partitionConsumers.get(partitionKey);
         if (concurrentPartitionConsumer == null) {
             concurrentPartitionConsumer = new ConcurrentPartitionConsumer<K, V>(partition, this.concurrentPartitionConsumerConfigs.get(partition.topic()));
             partitionConsumers.put(partitionKey, concurrentPartitionConsumer);
@@ -150,7 +157,7 @@ public class ConcurrentKafkaConsumer<K, V> implements AutoCloseable, ConsumerReb
     private void disconnectPartitionHandlers(Collection<TopicPartition> collection) {
         collection.forEach(k -> {
             String partitionKey = ConcurrentPartitionConsumer.getPartitionKey(k);
-            ConcurrentPartitionConsumer cpc = partitionConsumers.get(partitionKey);
+            ConcurrentPartitionConsumer<K, V> cpc = partitionConsumers.get(partitionKey);
             if (cpc != null) {
                 partitionConsumers.remove(partitionKey);
                 try {

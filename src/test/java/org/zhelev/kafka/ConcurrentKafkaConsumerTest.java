@@ -1,7 +1,6 @@
 package org.zhelev.kafka;
 
 import org.apache.kafka.common.serialization.StringDeserializer;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -59,10 +58,10 @@ public class ConcurrentKafkaConsumerTest {
 
         ConcurrentPartitionConsumerConfig<String, String> concurrentPartitionConsumerConfig = new ConcurrentPartitionConsumerConfig(recordConsumer);
         concurrentPartitionConsumerConfig.setExecutorSize(EXECUTOR_SIZE);
-        concurrentPartitionConsumerConfig.setQueueSize(QUEUES_PER_EXECUTOR);
+        concurrentPartitionConsumerConfig.setExecutorQueueSize(QUEUES_PER_EXECUTOR);
         concurrentPartitionConsumerConfig.setMaxBatchSize(MAX_BATCH_SIZE);
 
-        Map<String, ConcurrentPartitionConsumerConfig> concurrentPartitionConsumerConfigs = new HashMap<>(){{
+        Map<String, ConcurrentPartitionConsumerConfig<String, String>> concurrentPartitionConsumerConfigs = new HashMap<>(){{
             put(TOPIC, concurrentPartitionConsumerConfig);
         }};
 
@@ -88,10 +87,10 @@ public class ConcurrentKafkaConsumerTest {
 
         ConcurrentPartitionConsumerConfig<String, String> concurrentPartitionConsumerConfig = new ConcurrentPartitionConsumerConfig(recordConsumer);
         concurrentPartitionConsumerConfig.setExecutorSize(EXECUTOR_SIZE);
-        concurrentPartitionConsumerConfig.setQueueSize(QUEUES_PER_EXECUTOR);
+        concurrentPartitionConsumerConfig.setExecutorQueueSize(QUEUES_PER_EXECUTOR);
         concurrentPartitionConsumerConfig.setMaxBatchSize(MAX_BATCH_SIZE);
 
-        Map<String, ConcurrentPartitionConsumerConfig> concurrentPartitionConsumerConfigs = new HashMap<>(){{
+        Map<String, ConcurrentPartitionConsumerConfig<String, String>> concurrentPartitionConsumerConfigs = new HashMap<>(){{
             put(TOPIC, concurrentPartitionConsumerConfig);
         }};
 

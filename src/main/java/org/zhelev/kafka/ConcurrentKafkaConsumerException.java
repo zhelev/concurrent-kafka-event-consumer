@@ -4,25 +4,25 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 
 public class ConcurrentKafkaConsumerException extends RuntimeException {
 
-    public ConsumerRecord getConsumerRecord() {
-        return consumerRecord;
-    }
+    private final ConsumerRecord failedRecord;
 
-    private ConsumerRecord consumerRecord;
+    public ConsumerRecord getFailedRecord() {
+        return failedRecord;
+    }
 
     public ConcurrentKafkaConsumerException(ConsumerRecord consumerRecord) {
         super();
-        this.consumerRecord = consumerRecord;
+        this.failedRecord = consumerRecord;
     }
 
     public ConcurrentKafkaConsumerException(String message, ConsumerRecord consumerRecord) {
         super(message);
-        this.consumerRecord = consumerRecord;
+        this.failedRecord = consumerRecord;
     }
 
     public ConcurrentKafkaConsumerException(Throwable throwable, ConsumerRecord consumerRecord) {
         super(throwable);
-        this.consumerRecord = consumerRecord;
+        this.failedRecord = consumerRecord;
     }
 
 }
