@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Vector;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -75,7 +76,7 @@ public class ConcurrentPartitionConsumer<K, V> implements AutoCloseable {
             }
 
             // passing the processedRecords is a side effect, but we want to keep a handle of the processed records
-            CompletableFuture<ConsumerRecord<K, V>> future = processRecord(record, processedRecords);
+            CompletableFuture<ConsumerRecord<K, V>> future = createRecordFuture(record, processedRecords);
             futures.add(future);
 
             // use batching => block process, schedule async commit
@@ -88,17 +89,27 @@ public class ConcurrentPartitionConsumer<K, V> implements AutoCloseable {
                     handleBatch(futures);
                     count += processedRecords.size();
                 } catch (ConcurrentKafkaConsumerException e) {
-                    log.error(e.getMessage(), e);
+                    cancelFutures(futures);
                     ConsumerRecord failedRecord = e.getFailedRecord();
                     log.error("Breaking execution! Failed processing record: {}", failedRecord);
                     throw new ConcurrentPartitionConsumerException(e, processedRecords, this.topicPartition);
+                } finally {
+                    futures.clear();
                 }
             }
         }
 
-        handleBatch(futures);
+        try {
+            handleBatch(futures);
+        } catch (ConcurrentKafkaConsumerException e) {
+            cancelFutures(futures);
+            ConsumerRecord failedRecord = e.getFailedRecord();
+            log.error("Breaking execution! Failed processing record: {}", failedRecord);
+            throw new ConcurrentPartitionConsumerException(e, processedRecords, this.topicPartition);
+        } finally {
+            futures.clear();
+        }
         count += processedRecords.size();
-        futures.clear();
 
         if (log.isInfoEnabled()) {
             if (count > 0) {
@@ -111,30 +122,52 @@ public class ConcurrentPartitionConsumer<K, V> implements AutoCloseable {
         return processedRecords;
     }
 
+    private static <K, V> void cancelFutures(List<CompletableFuture<ConsumerRecord<K, V>>> futures) {
+        futures.forEach(f -> {
+            try {
+                f.cancel(true);
+            } catch (Exception e) {
+                log.warn("Error canceling batch future", e.getMessage());
+            }
+        });
+    }
+
     private void handleBatch(List<CompletableFuture<ConsumerRecord<K, V>>> futures)
             throws ConcurrentKafkaConsumerException {
 
         if (!futures.isEmpty()) {
-            List<ConsumerRecord<K, V>> batchRecords = processConsumerRecordsBatch(futures);
-            if (log.isTraceEnabled()) {
-                log.trace("Processed record batch of size: {}", batchRecords.size());
+            try {
+                List<ConsumerRecord<K, V>> batchRecords = processConsumerRecordsBatch(futures);
+                if (log.isTraceEnabled()) {
+                    log.trace("Processed record batch of size: {}", batchRecords.size());
+                }
+            } catch (CompletionException completionException) {
+                log.error(completionException.getMessage(), completionException.getCause());
+                if (completionException.getCause() instanceof ConcurrentKafkaConsumerException) {
+                    throw (ConcurrentKafkaConsumerException) completionException.getCause();
+                } else {
+                    throw completionException;
+                }
             }
-            futures.clear();
         }
     }
 
-    private List<ConsumerRecord<K, V>> processConsumerRecordsBatch(List<CompletableFuture<ConsumerRecord<K, V>>> futures) {
+    private List<ConsumerRecord<K, V>> processConsumerRecordsBatch
+            (List<CompletableFuture<ConsumerRecord<K, V>>> futures) {
         return futures.stream().map(CompletableFuture::join).collect(Collectors.toList());
     }
 
-    private CompletableFuture<ConsumerRecord<K, V>> processRecord(ConsumerRecord<K, V> kafkaRecord, Vector<ConsumerRecord<K, V>> processedRecords) {
+    private CompletableFuture<ConsumerRecord<K, V>> createRecordFuture
+            (ConsumerRecord<K, V> kafkaRecord, Vector<ConsumerRecord<K, V>> processedRecords) {
         ExecutorService recordExecutor = keyPartitionedExecutors.getExecutorForKey(kafkaRecord.key());
         final IConcurrentKafkaConsumer<K, V> recordConsumer = concurrentPartitionConsumerConfig.getRecordConsumer();
+
         return CompletableFuture.supplyAsync(() -> {
             ConsumerRecord<K, V> record = recordConsumer.consume(kafkaRecord);
             processedRecords.add(record);
             return record;
         }, recordExecutor);
+
     }
 
     @Override

@@ -8,7 +8,6 @@ import org.slf4j.LoggerFactory;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.stream.Collectors;
 
 public class ConcurrentKafkaConsumer<K, V> implements AutoCloseable, ConsumerRebalanceListener {
 
@@ -49,6 +48,8 @@ public class ConcurrentKafkaConsumer<K, V> implements AutoCloseable, ConsumerReb
 
                 long start = System.nanoTime();
 
+                log.warn("======> {}", partitionConsumers.keySet());
+
                 ConsumerRecords<K, V> records = consumer.poll(pollDuration);
                 int recordCount = records.count();
                 if (recordCount > 0) {
@@ -60,31 +61,47 @@ public class ConcurrentKafkaConsumer<K, V> implements AutoCloseable, ConsumerReb
 
                     List<ConsumerRecord<K, V>> partitionRecords = records.records(partition);
                     final ConcurrentPartitionConsumer<K, V> concurrentPartitionConsumer = getConcurrentPartitionConsumer(partition);
-
                     CompletableFuture<List<ConsumerRecord<K, V>>> future = CompletableFuture.supplyAsync(() -> {
                                 final String partitionKey = ConcurrentPartitionConsumer.getPartitionKey(partition);
                                 try {
                                     Thread.currentThread().setName("cpc-" + partitionKey);
                                     return concurrentPartitionConsumer.consume(partitionRecords);
+                                } catch (CompletionException completionException) {
+                                    if (completionException.getCause() instanceof ConcurrentKafkaConsumerException) {
+                                        throw (ConcurrentKafkaConsumerException) completionException.getCause();
+                                    } else {
+                                        try {
+                                            partitionConsumers.remove(partitionKey); // next iteration will create a new one
+                                            concurrentPartitionConsumer.close();
+                                        } catch (Exception e) {
+                                            log.warn(e.getMessage(), e);
+                                        }
+                                    }
                                 } catch (ConcurrentPartitionConsumerException cpex) {
                                     log.error(cpex.getMessage(), cpex);
                                     log.error("[{}] Error processing record {}", partitionKey, cpex.getFailedRecord());
-                                    log.error("[{}] Successfully processed records in this batch {}", partitionKey, cpex.getProcessedRecords());
+                                    log.error("[{}] Successfully processed records in this batch {}", partitionKey, cpex.getProcessedRecords().size());
                                     log.error("[{}] Failed partition records count: {}", partitionKey,
                                             (partitionRecords.size() - cpex.getProcessedRecords().size()));
                                     log.error("[{}] Last successfully commited offset: {}", partitionKey, lastCommittedOffsets.get(partitionKey));
-                                    throw cpex;
-                                } catch (Exception ex) {
+                                    try {
+                                        partitionConsumers.remove(partitionKey); // next iteration will create a new one
+                                        concurrentPartitionConsumer.close();
+                                    } catch (Exception e) {
+                                        log.warn(e.getMessage(), e);
+                                    }
+                                } catch (Throwable ex) {
                                     log.error(ex.getMessage(), ex);
                                     try {
                                         partitionConsumers.remove(partitionKey); // next iteration will create a new one
                                         concurrentPartitionConsumer.close();
                                     } catch (Exception e) {
-                                        log.warn(ex.getMessage(), e);
+                                        log.warn(e.getMessage(), e);
                                     }
                                 } finally {
                                     Thread.currentThread().setName("cpc-free-" + Thread.currentThread().getId());
                                 }
+                                log.warn("[{}] Returning an empty list", partitionKey);
                                 return new ArrayList<>();
                             }
                             ,
@@ -114,12 +131,39 @@ public class ConcurrentKafkaConsumer<K, V> implements AutoCloseable, ConsumerReb
 
     private Integer commitPartitionRecords(Consumer<K, V> consumer, List<CompletableFuture<List<ConsumerRecord<K, V>>>> futures) {
 
-        List<List<ConsumerRecord<K, V>>> records = futures.stream().map(CompletableFuture::join).collect(Collectors.toList());
-        records.forEach(partitionRecords -> {
-            commitPartitionOffset(consumer, partitionRecords, isAutoCommitEnabled);
-        });
+        try {
+            List<List<ConsumerRecord<K, V>>> records = futures.stream().map(CompletableFuture::join).toList();
+            records.forEach(partitionRecords -> {
+                commitPartitionOffset(consumer, partitionRecords, isAutoCommitEnabled);
+            });
+            return records.stream().map(Collection::size).reduce(0, Integer::sum);
+        } catch (CompletionException completionException) {
+            log.error(completionException.getMessage(), completionException.getCause());
+            if (completionException.getCause() instanceof ConcurrentPartitionConsumerException) {
+                ConcurrentPartitionConsumerException cpex = (ConcurrentPartitionConsumerException) completionException.getCause();
+                String partitionKey = ConcurrentPartitionConsumer.getPartitionKey(cpex.getTopicPartition());
+                ConcurrentPartitionConsumer<K,V> concurrentPartitionConsumer = partitionConsumers.remove(partitionKey);
+                if(concurrentPartitionConsumer !=null){
+                    concurrentPartitionConsumer.close();
+                }
+            } else {
+                throw completionException;
+            }
+        }catch(ConcurrentPartitionConsumerException cpe){
+            try {
+                String partitionKey = ConcurrentPartitionConsumer.getPartitionKey(cpe.getTopicPartition());
+                ConcurrentPartitionConsumer<K,V> concurrentPartitionConsumer = partitionConsumers.remove(partitionKey);
+                if(concurrentPartitionConsumer !=null){
+                    concurrentPartitionConsumer.close();
+                }
+            } catch (Exception e) {
+                log.warn(e.getMessage(), e);
+            }
+        }catch (Exception e){
+            log.error(e.getMessage(), e);
+        }
 
-        return records.stream().map(Collection::size).reduce(0, Integer::sum);
+        return 0;
     }
 
     private void commitPartitionOffset(Consumer<K, V> consumer, List<ConsumerRecord<K, V>> partitionRecords, Boolean isAutoCommitEnabled) {
