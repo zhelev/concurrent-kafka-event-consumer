@@ -20,9 +20,10 @@ public class ConcurrentKafkaConsumer<K, V> implements AutoCloseable, ConsumerReb
     private final Boolean isAutoCommitEnabled;
     private final ExecutorService executorService;
     private final ConcurrentHashMap<String, ConcurrentPartitionConsumer<K, V>> partitionConsumers;
+    private final ConcurrentHashMap<String, OffsetAndMetadata> lastCommittedOffsets;
 
-    public ConcurrentKafkaConsumer(Properties consumerProperties, Duration pollDuration,
-                                   Map<String, ConcurrentPartitionConsumerConfig<K, V>> concurrentPartitionConsumerConfigs) {
+    public ConcurrentKafkaConsumer(final Properties consumerProperties, final Duration pollDuration,
+                                   final Map<String, ConcurrentPartitionConsumerConfig<K, V>> concurrentPartitionConsumerConfigs) {
         this.consumerProperties = consumerProperties;
         this.pollDuration = pollDuration;
         this.concurrentPartitionConsumerConfigs = concurrentPartitionConsumerConfigs;
@@ -32,6 +33,7 @@ public class ConcurrentKafkaConsumer<K, V> implements AutoCloseable, ConsumerReb
             log.warn("Using 'enable.auto.commit=true' is not recommended when processing records concurrently.");
         }
         this.partitionConsumers = new ConcurrentHashMap<>();
+        this.lastCommittedOffsets = new ConcurrentHashMap<>();
         this.executorService = Executors.newCachedThreadPool();
     }
 
@@ -40,35 +42,42 @@ public class ConcurrentKafkaConsumer<K, V> implements AutoCloseable, ConsumerReb
 
             consumer.subscribe(this.concurrentPartitionConsumerConfigs.keySet(), this);
 
+            long count = 0;
+            long firstBatchArrival = 0;
+
             while (!Thread.currentThread().isInterrupted()) {
 
                 long start = System.nanoTime();
 
                 ConsumerRecords<K, V> records = consumer.poll(pollDuration);
+                int recordCount = records.count();
+                if (recordCount > 0) {
+                    log.info("{} Start processing records {} ...", partitionConsumers.keySet(), recordCount);
+                }
 
-                Vector<CompletableFuture<List<ConsumerRecord<K, V>>>> futures = new Vector<>();
+                List<CompletableFuture<List<ConsumerRecord<K, V>>>> futures = new ArrayList<>();
                 for (TopicPartition partition : records.partitions()) {
 
                     List<ConsumerRecord<K, V>> partitionRecords = records.records(partition);
-
-                    final String partitionKey = ConcurrentPartitionConsumer.getPartitionKey(partition);
-                    final ConcurrentPartitionConsumer<K, V> concurrentPartitionConsumer = getConcurrentPartitionConsumer(partition, partitionKey, consumer);
+                    final ConcurrentPartitionConsumer<K, V> concurrentPartitionConsumer = getConcurrentPartitionConsumer(partition);
 
                     CompletableFuture<List<ConsumerRecord<K, V>>> future = CompletableFuture.supplyAsync(() -> {
+                                final String partitionKey = ConcurrentPartitionConsumer.getPartitionKey(partition);
                                 try {
                                     Thread.currentThread().setName("cpc-" + partitionKey);
                                     return concurrentPartitionConsumer.consume(partitionRecords);
                                 } catch (ConcurrentPartitionConsumerException cpex) {
                                     log.error(cpex.getMessage(), cpex);
-                                    log.error("Error processing record {}", cpex.getFailedRecord());
-                                    log.error("Successfully processed records in this batch {}", cpex.getProcessedRecords());
-                                    log.error("Failed partition is {}", cpex.getTopicPartition().topic() + " " + cpex.getTopicPartition().partition());
-                                    log.error("Failed partition records count: {}", (partitionRecords.size() - cpex.getProcessedRecords().size()));
+                                    log.error("[{}] Error processing record {}", partitionKey, cpex.getFailedRecord());
+                                    log.error("[{}] Successfully processed records in this batch {}", partitionKey, cpex.getProcessedRecords());
+                                    log.error("[{}] Failed partition records count: {}", partitionKey,
+                                            (partitionRecords.size() - cpex.getProcessedRecords().size()));
+                                    log.error("[{}] Last successfully commited offset: {}", partitionKey, lastCommittedOffsets.get(partitionKey));
                                     throw cpex;
                                 } catch (Exception ex) {
                                     log.error(ex.getMessage(), ex);
                                     try {
-                                        partitionConsumers.remove(partitionKey);
+                                        partitionConsumers.remove(partitionKey); // next iteration will create a new one
                                         concurrentPartitionConsumer.close();
                                     } catch (Exception e) {
                                         log.warn(ex.getMessage(), e);
@@ -84,19 +93,28 @@ public class ConcurrentKafkaConsumer<K, V> implements AutoCloseable, ConsumerReb
 
                     futures.add(future);
                 }
-                Integer totalRecords = commitPartitionRecords(consumer, futures);
 
-                if (totalRecords > 0) {
-                    long duration = System.nanoTime() - start;
-                    log.debug("Processing {} records took {} ms", totalRecords, TimeUnit.NANOSECONDS.toMillis(duration));
+                Integer processedKafkaBatchRecords = commitPartitionRecords(consumer, futures);
+                count += processedKafkaBatchRecords;
+                if (processedKafkaBatchRecords > 0) {
+                    if (firstBatchArrival == 0) {
+                        firstBatchArrival = start;
+                    }
+                    long end = System.nanoTime();
+                    long duration = end - start;
+                    long processingTime = end - firstBatchArrival;
+                    double throughput = (double) count * 1_000_000_000 / processingTime;
+                    log.info("{} Processing {} records took {} ms", partitionConsumers.keySet(), processedKafkaBatchRecords, TimeUnit.NANOSECONDS.toMillis(duration));
+                    log.info("{} Consumed records so far {}, throughput is {} [rec/sec]", partitionConsumers.keySet(), count, String.format("%.2f", throughput));
                 }
+
             }
         }
     }
 
-    private Integer commitPartitionRecords(Consumer<K,V> consumer, Vector<CompletableFuture<List<ConsumerRecord<K, V>>>> futures) {
+    private Integer commitPartitionRecords(Consumer<K, V> consumer, List<CompletableFuture<List<ConsumerRecord<K, V>>>> futures) {
 
-        List<List<ConsumerRecord<K, V>>> records = futures.stream().map(CompletableFuture::join).toList();
+        List<List<ConsumerRecord<K, V>>> records = futures.stream().map(CompletableFuture::join).collect(Collectors.toList());
         records.forEach(partitionRecords -> {
             commitPartitionOffset(consumer, partitionRecords, isAutoCommitEnabled);
         });
@@ -104,7 +122,7 @@ public class ConcurrentKafkaConsumer<K, V> implements AutoCloseable, ConsumerReb
         return records.stream().map(Collection::size).reduce(0, Integer::sum);
     }
 
-    private void commitPartitionOffset(Consumer<K,V> consumer, List<ConsumerRecord<K, V>> partitionRecords, Boolean isAutoCommitEnabled) {
+    private void commitPartitionOffset(Consumer<K, V> consumer, List<ConsumerRecord<K, V>> partitionRecords, Boolean isAutoCommitEnabled) {
 
         if (!isAutoCommitEnabled && !partitionRecords.isEmpty()) {
             TopicPartition topicPartition = new TopicPartition(partitionRecords.get(0).topic(), partitionRecords.get(0).partition());
@@ -114,6 +132,12 @@ public class ConcurrentKafkaConsumer<K, V> implements AutoCloseable, ConsumerReb
                     (commit, err) -> {
                         String messsage = "commit " + commit + ", last offset " + lastOffset + ", records count " + partitionRecords.size();
                         if (err == null) {
+
+                            commit.forEach((k, v) -> {
+                                String partitionKey = ConcurrentPartitionConsumer.getPartitionKey(k);
+                                lastCommittedOffsets.put(partitionKey, v);
+                            });
+
                             log.debug("Successfully commited => {}", messsage);
                         } else {
                             String errMsg = "Error on commit " + messsage;
@@ -126,8 +150,12 @@ public class ConcurrentKafkaConsumer<K, V> implements AutoCloseable, ConsumerReb
         }
     }
 
+    private ConcurrentPartitionConsumer<K, V> getConcurrentPartitionConsumer(TopicPartition partition) {
+        final String partitionKey = ConcurrentPartitionConsumer.getPartitionKey(partition);
+        return getConcurrentPartitionConsumer(partition, partitionKey);
+    }
 
-    private ConcurrentPartitionConsumer<K, V> getConcurrentPartitionConsumer(TopicPartition partition, String partitionKey, Consumer<K, V> consumer) {
+    private ConcurrentPartitionConsumer<K, V> getConcurrentPartitionConsumer(TopicPartition partition, String partitionKey) {
         ConcurrentPartitionConsumer<K, V> concurrentPartitionConsumer = partitionConsumers.get(partitionKey);
         if (concurrentPartitionConsumer == null) {
             concurrentPartitionConsumer = new ConcurrentPartitionConsumer<K, V>(partition, this.concurrentPartitionConsumerConfigs.get(partition.topic()));
@@ -172,7 +200,7 @@ public class ConcurrentKafkaConsumer<K, V> implements AutoCloseable, ConsumerReb
 
     @Override
     public void onPartitionsAssigned(Collection<TopicPartition> collection) {
-        log.warn("Got assigned some new partitions: {}", collection);
+        log.info("Got assigned some new partitions: {}", collection);
     }
 
     @Override

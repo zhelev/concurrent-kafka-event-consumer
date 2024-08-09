@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Vector;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 public class ConcurrentPartitionConsumer<K, V> implements AutoCloseable {
@@ -65,6 +66,8 @@ public class ConcurrentPartitionConsumer<K, V> implements AutoCloseable {
         Vector<ConsumerRecord<K, V>> processedRecords = new Vector<>();
         long count = 0;
 
+        long start = System.nanoTime();
+
         for (ConsumerRecord<K, V> record : partitionRecords) {
 
             if (Thread.interrupted()) {
@@ -95,11 +98,15 @@ public class ConcurrentPartitionConsumer<K, V> implements AutoCloseable {
 
         handleBatch(futures);
         count += processedRecords.size();
-
-        if (log.isTraceEnabled()) {
-            log.trace("Processed in batch {} ", count);
-        }
         futures.clear();
+
+        if (log.isInfoEnabled()) {
+            if (count > 0) {
+                long duration = System.nanoTime() - start;
+                double throughput = (double) count * 1_000_000_000 / duration;
+                log.info("[{}] Processing {} records took {} ms, throughput is {} [rec/sec]:", getPartitionKey(), count, TimeUnit.NANOSECONDS.toMillis(duration), String.format("%.2f", throughput));
+            }
+        }
 
         return processedRecords;
     }
