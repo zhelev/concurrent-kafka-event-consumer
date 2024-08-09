@@ -74,9 +74,9 @@ public class ConcurrentKafkaConsumer<K, V> implements AutoCloseable, ConsumerReb
                                         log.warn(ex.getMessage(), e);
                                     }
                                 } finally {
-                                    Thread.currentThread().setName("cpc-free-thread-" + Thread.currentThread().getId());
+                                    Thread.currentThread().setName("cpc-free-" + Thread.currentThread().getId());
                                 }
-                                return new ArrayList<ConsumerRecord<K, V>>();
+                                return new ArrayList<>();
                             }
                             ,
                             executorService
@@ -94,19 +94,19 @@ public class ConcurrentKafkaConsumer<K, V> implements AutoCloseable, ConsumerReb
         }
     }
 
-    private Integer commitPartitionRecords(Consumer consumer, Vector<CompletableFuture<List<ConsumerRecord<K, V>>>> futures) {
+    private Integer commitPartitionRecords(Consumer<K,V> consumer, Vector<CompletableFuture<List<ConsumerRecord<K, V>>>> futures) {
 
-        List<List<ConsumerRecord<K, V>>> records = futures.stream().map(CompletableFuture::join)
-                .collect(Collectors.toList());
+        List<List<ConsumerRecord<K, V>>> records = futures.stream().map(CompletableFuture::join).toList();
         records.forEach(partitionRecords -> {
             commitPartitionOffset(consumer, partitionRecords, isAutoCommitEnabled);
         });
+
         return records.stream().map(Collection::size).reduce(0, Integer::sum);
     }
 
-    private void commitPartitionOffset(Consumer consumer, List<ConsumerRecord<K, V>> partitionRecords, Boolean isAutoCommitEnabled) {
+    private void commitPartitionOffset(Consumer<K,V> consumer, List<ConsumerRecord<K, V>> partitionRecords, Boolean isAutoCommitEnabled) {
 
-        if (!isAutoCommitEnabled && partitionRecords.size() > 0) {
+        if (!isAutoCommitEnabled && !partitionRecords.isEmpty()) {
             TopicPartition topicPartition = new TopicPartition(partitionRecords.get(0).topic(), partitionRecords.get(0).partition());
             long lastOffset = partitionRecords.stream().max(Comparator.comparingLong(ConsumerRecord::offset)).get().offset();
             consumer.commitAsync(
