@@ -4,6 +4,9 @@ import org.apache.kafka.clients.consumer.*;
 import org.apache.kafka.common.TopicPartition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.zhelev.kafka.partition.ConcurrentPartitionConsumer;
+import org.zhelev.kafka.partition.ConcurrentPartitionConsumerConfig;
+import org.zhelev.kafka.partition.ConcurrentPartitionConsumerException;
 
 import java.time.Duration;
 import java.util.*;
@@ -48,7 +51,7 @@ public class ConcurrentKafkaConsumer<K, V> implements AutoCloseable, ConsumerReb
 
                 long start = System.nanoTime();
 
-                log.warn("======> {}", partitionConsumers.keySet());
+                // log.warn("======> {}", partitionConsumers.keySet());
 
                 ConsumerRecords<K, V> records = consumer.poll(pollDuration);
                 int recordCount = records.count();

@@ -1,7 +1,8 @@
-package org.zhelev.kafka;
+package org.zhelev.kafka.partition;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.TopicPartition;
+import org.zhelev.kafka.ConcurrentKafkaConsumerException;
 
 import java.util.Vector;
 

@@ -1,4 +1,6 @@
-package org.zhelev.kafka;
+package org.zhelev.kafka.partition;
+
+import org.zhelev.kafka.IConcurrentKafkaConsumer;
 
 public class ConcurrentPartitionConsumerConfig<K, V> {
 

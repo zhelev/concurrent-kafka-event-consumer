@@ -1,9 +1,12 @@
-package org.zhelev.kafka;
+package org.zhelev.kafka.partition;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.TopicPartition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.zhelev.kafka.ConcurrentKafkaConsumerException;
+import org.zhelev.kafka.IConcurrentKafkaConsumer;
+import org.zhelev.kafka.utils.KeyPartitionedExecutors;
 
 import java.util.ArrayList;
 import java.util.List;

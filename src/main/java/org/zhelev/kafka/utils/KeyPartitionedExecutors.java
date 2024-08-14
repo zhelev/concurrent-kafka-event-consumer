@@ -3,7 +3,7 @@
  *
  * @author krasimir.zhelev@gmail.com
  */
-package org.zhelev.kafka;
+package org.zhelev.kafka.utils;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -193,7 +193,7 @@ public class KeyPartitionedExecutors implements AutoCloseable {
         return executors.get(getExecutorIndex(key));
     }
 
-    protected int getExecutorIndex(Object key) {
+    public int getExecutorIndex(Object key) {
         int hashCode = key.hashCode();
         int executorIndex = Math.abs(hashCode % this.executorSize);
         if (executorIndex >= this.executorSize) { // should never happen

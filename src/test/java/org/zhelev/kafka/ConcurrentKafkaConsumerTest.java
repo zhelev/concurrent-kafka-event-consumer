@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.zhelev.kafka.partition.ConcurrentPartitionConsumerConfig;
 
 import java.time.Duration;
 import java.util.*;
@@ -145,7 +146,7 @@ public class ConcurrentKafkaConsumerTest {
             }
 
             int random = rand.nextInt(0, 100);
-            if (random > 98) {
+            if (random > 120) {
                 throw new RuntimeException("I was unlucky!");
                 // throw new ConcurrentKafkaConsumerException("I lost database connection", record);
             }
