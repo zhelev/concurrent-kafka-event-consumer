@@ -33,17 +33,72 @@ public class ConcurrentKafkaConsumerTest {
 
     // ConcurrentKafkaConsumer class config
     private static final String TOPIC = "idmusers";
-    private static final List<String> TOPICS = List.of(TOPIC);
     private static final Duration POLL_DURATION = Duration.ofMillis(100);
-    private static final int EXECUTOR_SIZE = 20; // Runtime.getRuntime().availableProcessors();
+    private static final int EXECUTOR_SIZE = 20; // Runtime.getRuntime().availableProcessors(); // IO vs CPU blocking
     private static final int QUEUES_PER_EXECUTOR = 40;
+    private static final int MAX_RETRY_COUNT = 10;
     private static final int MAX_BATCH_SIZE = EXECUTOR_SIZE * QUEUES_PER_EXECUTOR;
 
 
-    private static final Integer MAX_SLEEP_TIME = 500;
-    private static final Integer MIN_SLEEP_TIME = 100;
+    private static final Integer MAX_SLEEP_TIME = 300;
+    private static final Integer MIN_SLEEP_TIME = 50;
     private static final Integer DEF_SLEEP_TIME = 300;
+    public static final int SUCCESS_PERCENTAGE_RATE = 94;
 
+    private static Map<String, ConcurrentPartitionConsumerConfig<String, String>> getDefaultConcurrentPartitionConsumerConfig(IConcurrentKafkaConsumer<String, String> recordConsumer) {
+        ConcurrentPartitionConsumerConfig<String, String> concurrentPartitionConsumerConfig = new ConcurrentPartitionConsumerConfig<>(recordConsumer);
+        concurrentPartitionConsumerConfig.setExecutorSize(EXECUTOR_SIZE);
+        concurrentPartitionConsumerConfig.setExecutorQueueSize(QUEUES_PER_EXECUTOR);
+        concurrentPartitionConsumerConfig.setMaxBatchSize(MAX_BATCH_SIZE);
+        concurrentPartitionConsumerConfig.setMaxRetryCount(MAX_RETRY_COUNT);
+
+        return new HashMap<>() {{
+            put(TOPIC, concurrentPartitionConsumerConfig);
+        }};
+    }
+
+    private static void doDefaultConsume(IConcurrentKafkaConsumer<String, String> recordConsumer) {
+        Map<String, ConcurrentPartitionConsumerConfig<String, String>> concurrentPartitionConsumerConfigs = getDefaultConcurrentPartitionConsumerConfig(recordConsumer);
+
+        try (ConcurrentKafkaConsumer<String, String> kafkaConcurrentConsumer = new ConcurrentKafkaConsumer<>(
+                CONSUMER_PROPS, POLL_DURATION, concurrentPartitionConsumerConfigs)) {
+            kafkaConcurrentConsumer.consume();
+        } catch (Exception e) {
+            log.error(e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Normal processing
+     * */
+    @Test
+    void basicTest() {
+
+        ConcurrentHashMap<String, String> registry = new ConcurrentHashMap<>();
+
+        // noop record processor
+        IConcurrentKafkaConsumer<String, String> recordConsumer = record -> {
+            final String currentThreadName = Thread.currentThread().getName();
+            // log.info("Processing record with key {} partition {} on thread {}", record.key(), record.partition(), currentThreadName);
+            String threadName = registry.get(record.key());
+            if (threadName == null) {
+                registry.put(record.key(), currentThreadName);
+            } else {
+                Assertions.assertEquals(threadName, currentThreadName);
+            }
+
+            // event processing happens here
+            return record;
+        };
+
+        doDefaultConsume(recordConsumer);
+        registry.clear();
+    }
+
+
+    /**
+     * Processing takes
+     * */
     @Test
     void sleepyTest() {
 
@@ -70,68 +125,18 @@ public class ConcurrentKafkaConsumerTest {
             return record;
         };
 
-        ConcurrentPartitionConsumerConfig<String, String> concurrentPartitionConsumerConfig = new ConcurrentPartitionConsumerConfig(recordConsumer);
-        concurrentPartitionConsumerConfig.setExecutorSize(EXECUTOR_SIZE);
-        concurrentPartitionConsumerConfig.setExecutorQueueSize(QUEUES_PER_EXECUTOR);
-        concurrentPartitionConsumerConfig.setMaxBatchSize(MAX_BATCH_SIZE);
-
-        Map<String, ConcurrentPartitionConsumerConfig<String, String>> concurrentPartitionConsumerConfigs = new HashMap<>() {{
-            put(TOPIC, concurrentPartitionConsumerConfig);
-        }};
-
-
-        try (ConcurrentKafkaConsumer<String, String> kafkaConcurrentConsumer = new ConcurrentKafkaConsumer<>(
-                CONSUMER_PROPS, POLL_DURATION, concurrentPartitionConsumerConfigs)) {
-            kafkaConcurrentConsumer.consume();
-        } catch (Exception e) {
-            log.error(e.getMessage(), e);
-        }
-
+        doDefaultConsume(recordConsumer);
+        registry.clear();
     }
 
-    @Test
-    void basicTest() {
-
-        ConcurrentHashMap<String, String> registry = new ConcurrentHashMap<>();
-
-        // noop record processor
-        IConcurrentKafkaConsumer<String, String> recordConsumer = record -> {
-            final String currentThreadName = Thread.currentThread().getName();
-            // log.info("Processing record with key {} partition {} on thread {}", record.key(), record.partition(), currentThreadName);
-            String threadName = registry.get(record.key());
-            if (threadName == null) {
-                registry.put(record.key(), currentThreadName);
-            } else {
-                Assertions.assertEquals(threadName, currentThreadName);
-            }
-
-            // event processing happens here
-            return record;
-        };
-
-        ConcurrentPartitionConsumerConfig<String, String> concurrentPartitionConsumerConfig = new ConcurrentPartitionConsumerConfig(recordConsumer);
-        concurrentPartitionConsumerConfig.setExecutorSize(EXECUTOR_SIZE);
-        concurrentPartitionConsumerConfig.setExecutorQueueSize(QUEUES_PER_EXECUTOR);
-        concurrentPartitionConsumerConfig.setMaxBatchSize(MAX_BATCH_SIZE);
-
-        Map<String, ConcurrentPartitionConsumerConfig<String, String>> concurrentPartitionConsumerConfigs = new HashMap<>() {{
-            put(TOPIC, concurrentPartitionConsumerConfig);
-        }};
-
-
-        try (ConcurrentKafkaConsumer<String, String> kafkaConcurrentConsumer = new ConcurrentKafkaConsumer<>(
-                CONSUMER_PROPS, POLL_DURATION, concurrentPartitionConsumerConfigs)) {
-            kafkaConcurrentConsumer.consume();
-        } catch (Exception e) {
-            log.error(e.getMessage(), e);
-        }
-    }
-
+    /**
+     * Processing takes time and sometimes fails
+     */
     @Test
     void errorTest() {
 
         ConcurrentHashMap<String, String> registry = new ConcurrentHashMap<>();
-
+        ConcurrentHashMap<String, String> failedRecordRegistry = new ConcurrentHashMap<>();
         final Random rand = new Random();
 
         // noop record processor
@@ -145,33 +150,33 @@ public class ConcurrentKafkaConsumerTest {
                 Assertions.assertEquals(threadName, currentThreadName);
             }
 
-            int random = rand.nextInt(0, 100);
-            if (random > 120) {
-                throw new RuntimeException("I was unlucky!");
-                // throw new ConcurrentKafkaConsumerException("I lost database connection", record);
+            if (Thread.currentThread().isInterrupted()) {
+                throw new ConcurrentKafkaConsumerException("Thread interrupted", record);
             }
 
+            // this event takes log to process
+            try {
+                long sleepFor = new Random().nextInt(MIN_SLEEP_TIME, MAX_SLEEP_TIME); // DEF_SLEEP_TIME
+                Thread.sleep(sleepFor);
+            } catch (InterruptedException e) {
+                throw new ConcurrentKafkaConsumerException(e, record);
+            }
+
+            // this event can fail
+            int random = rand.nextInt(0, 100);
+            if (random > SUCCESS_PERCENTAGE_RATE) {
+                failedRecordRegistry.put(record.key(), record.value());
+                // throw new RuntimeException("I was unlucky, random is: " + random);
+                throw new ConcurrentKafkaConsumerException("I lost database connection. Fail rate set to " + (100 - SUCCESS_PERCENTAGE_RATE) + "%!", record);
+            }
 
             // event processing happens here
             return record;
         };
 
-        ConcurrentPartitionConsumerConfig<String, String> concurrentPartitionConsumerConfig = new ConcurrentPartitionConsumerConfig(recordConsumer);
-        concurrentPartitionConsumerConfig.setExecutorSize(EXECUTOR_SIZE);
-        concurrentPartitionConsumerConfig.setExecutorQueueSize(QUEUES_PER_EXECUTOR);
-        concurrentPartitionConsumerConfig.setMaxBatchSize(MAX_BATCH_SIZE);
+        doDefaultConsume(recordConsumer);
 
-        Map<String, ConcurrentPartitionConsumerConfig<String, String>> concurrentPartitionConsumerConfigs = new HashMap<>() {{
-            put(TOPIC, concurrentPartitionConsumerConfig);
-        }};
-
-
-        try (ConcurrentKafkaConsumer<String, String> kafkaConcurrentConsumer = new ConcurrentKafkaConsumer<>(
-                CONSUMER_PROPS, POLL_DURATION, concurrentPartitionConsumerConfigs)) {
-            kafkaConcurrentConsumer.consume();
-        } catch (Exception e) {
-            log.error(e.getMessage(), e);
-        }
+        log.warn("Failed records: {}", failedRecordRegistry);
     }
 
 }

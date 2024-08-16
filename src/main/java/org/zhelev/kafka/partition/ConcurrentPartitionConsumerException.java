@@ -2,41 +2,43 @@ package org.zhelev.kafka.partition;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.TopicPartition;
-import org.zhelev.kafka.ConcurrentKafkaConsumerException;
 
-import java.util.Vector;
+import java.io.Serializable;
+import java.util.Set;
 
-public class ConcurrentPartitionConsumerException extends ConcurrentKafkaConsumerException {
+public class ConcurrentPartitionConsumerException extends RuntimeException {
 
-    private final Vector processedRecords;
+    private final Set<ConsumerRecord> processedRecords;
+
+    private final Set<ConsumerRecord> failedRecords;
 
     private final TopicPartition topicPartition;
 
-    public ConcurrentPartitionConsumerException(final ConsumerRecord consumerRecord, final Vector<ConsumerRecord> processedRecords, final TopicPartition topicPartition) {
-        super(consumerRecord);
-        this.processedRecords = processedRecords;
+    public ConcurrentPartitionConsumerException(final String message,
+                                                final Set<ConsumerRecord> failedRecords,
+                                                final Set<ConsumerRecord> processedRecords,
+                                                final TopicPartition topicPartition) {
+        super(message);
         this.topicPartition = topicPartition;
+        this.failedRecords = failedRecords;
+        this.processedRecords = processedRecords;
     }
 
-    public ConcurrentPartitionConsumerException(final String message, final ConsumerRecord consumerRecord, final Vector<ConsumerRecord> processedRecords, final TopicPartition topicPartition) {
-        super(message, consumerRecord);
-        this.processedRecords = processedRecords;
+    public ConcurrentPartitionConsumerException(final Throwable throwable,
+                                                final Set<ConsumerRecord> failedRecords,
+                                                final Set<ConsumerRecord> processedRecords,
+                                                final TopicPartition topicPartition) {
+        super(throwable);
         this.topicPartition = topicPartition;
+        this.failedRecords = failedRecords;
+        this.processedRecords = processedRecords;
     }
 
-    public ConcurrentPartitionConsumerException(final Throwable throwable, final ConsumerRecord consumerRecord, final Vector processedRecords, final TopicPartition topicPartition) {
-        super(throwable, consumerRecord);
-        this.processedRecords = processedRecords;
-        this.topicPartition = topicPartition;
+    public Set<ConsumerRecord> getFailedRecords() {
+        return failedRecords;
     }
 
-    public ConcurrentPartitionConsumerException(final ConcurrentKafkaConsumerException exception, final Vector processedRecords, final TopicPartition topicPartition) {
-        super(exception, exception.getFailedRecord());
-        this.processedRecords = processedRecords;
-        this.topicPartition = topicPartition;
-    }
-
-    public Vector<ConsumerRecord> getProcessedRecords() {
+    public Set<ConsumerRecord> getProcessedRecords() {
         return processedRecords;
     }
 

@@ -82,7 +82,7 @@ public class ConcurrentKafkaConsumer<K, V> implements AutoCloseable, ConsumerReb
                                     }
                                 } catch (ConcurrentPartitionConsumerException cpex) {
                                     log.error(cpex.getMessage(), cpex);
-                                    log.error("[{}] Error processing record {}", partitionKey, cpex.getFailedRecord());
+                                    log.error("[{}] Error processing record {}", partitionKey, cpex.getFailedRecords());
                                     log.error("[{}] Successfully processed records in this batch {}", partitionKey, cpex.getProcessedRecords().size());
                                     log.error("[{}] Failed partition records count: {}", partitionKey,
                                             (partitionRecords.size() - cpex.getProcessedRecords().size()));

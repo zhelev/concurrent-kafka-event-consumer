@@ -10,11 +10,22 @@ public class ConcurrentPartitionConsumerConfig<K, V> {
 
     private Integer maxBatchSize = 100;
 
+    private Integer maxRetryCount = 10;
+
     private final IConcurrentKafkaConsumer<K, V> recordConsumer;
 
     public ConcurrentPartitionConsumerConfig(final IConcurrentKafkaConsumer<K, V> recordConsumer) {
         this.recordConsumer = recordConsumer;
     }
+
+    public Integer getMaxRetryCount() {
+        return maxRetryCount;
+    }
+
+    public void setMaxRetryCount(Integer maxRetryCount) {
+        this.maxRetryCount = maxRetryCount;
+    }
+
 
     public Integer getExecutorSize() {
         return executorSize;

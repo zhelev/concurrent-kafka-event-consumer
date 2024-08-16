@@ -6,21 +6,21 @@ public class ConcurrentKafkaConsumerException extends RuntimeException {
 
     private final ConsumerRecord failedRecord;
 
-    public ConsumerRecord getFailedRecord() {
+    public <K,V> ConsumerRecord<K,V> getFailedRecord() {
         return failedRecord;
     }
 
-    public ConcurrentKafkaConsumerException(ConsumerRecord consumerRecord) {
+    public <K,V> ConcurrentKafkaConsumerException(ConsumerRecord<K,V> consumerRecord) {
         super();
         this.failedRecord = consumerRecord;
     }
 
-    public ConcurrentKafkaConsumerException(String message, ConsumerRecord consumerRecord) {
+    public <K,V> ConcurrentKafkaConsumerException(String message, ConsumerRecord<K,V> consumerRecord) {
         super(message);
         this.failedRecord = consumerRecord;
     }
 
-    public ConcurrentKafkaConsumerException(Throwable throwable, ConsumerRecord consumerRecord) {
+    public <K,V> ConcurrentKafkaConsumerException(Throwable throwable, ConsumerRecord<K,V> consumerRecord) {
         super(throwable);
         this.failedRecord = consumerRecord;
     }
