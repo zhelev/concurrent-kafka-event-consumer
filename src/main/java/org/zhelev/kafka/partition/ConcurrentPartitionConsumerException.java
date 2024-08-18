@@ -2,43 +2,43 @@ package org.zhelev.kafka.partition;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.TopicPartition;
+import org.zhelev.kafka.dlq.IDeadLetterQueue;
 
-import java.io.Serializable;
-import java.util.Set;
+import java.util.List;
 
 public class ConcurrentPartitionConsumerException extends RuntimeException {
 
-    private final Set<ConsumerRecord> processedRecords;
+    private final List<ConsumerRecord> processedRecords;
 
-    private final Set<ConsumerRecord> failedRecords;
+    private final IDeadLetterQueue deadLetterQueue;
 
     private final TopicPartition topicPartition;
 
     public ConcurrentPartitionConsumerException(final String message,
-                                                final Set<ConsumerRecord> failedRecords,
-                                                final Set<ConsumerRecord> processedRecords,
+                                                final IDeadLetterQueue deadLetterQueue,
+                                                final List<ConsumerRecord> processedRecords,
                                                 final TopicPartition topicPartition) {
         super(message);
         this.topicPartition = topicPartition;
-        this.failedRecords = failedRecords;
+        this.deadLetterQueue = deadLetterQueue;
         this.processedRecords = processedRecords;
     }
 
     public ConcurrentPartitionConsumerException(final Throwable throwable,
-                                                final Set<ConsumerRecord> failedRecords,
-                                                final Set<ConsumerRecord> processedRecords,
+                                                final IDeadLetterQueue deadLetterQueue,
+                                                final List<ConsumerRecord> processedRecords,
                                                 final TopicPartition topicPartition) {
         super(throwable);
         this.topicPartition = topicPartition;
-        this.failedRecords = failedRecords;
+        this.deadLetterQueue = deadLetterQueue;
         this.processedRecords = processedRecords;
     }
 
-    public Set<ConsumerRecord> getFailedRecords() {
-        return failedRecords;
+    public IDeadLetterQueue getDeadLetterQueue() {
+        return deadLetterQueue;
     }
 
-    public Set<ConsumerRecord> getProcessedRecords() {
+    public List<ConsumerRecord> getProcessedRecords() {
         return processedRecords;
     }
 

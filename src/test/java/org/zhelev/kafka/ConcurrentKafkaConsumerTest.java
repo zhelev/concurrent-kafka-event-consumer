@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.zhelev.kafka.dlq.InMemoryDeadLetterQueue;
 import org.zhelev.kafka.partition.ConcurrentPartitionConsumerConfig;
 
 import java.time.Duration;
@@ -32,7 +33,7 @@ public class ConcurrentKafkaConsumerTest {
     }};
 
     // ConcurrentKafkaConsumer class config
-    private static final String TOPIC = "idmusers";
+    private static final String TOPIC = "test";
     private static final Duration POLL_DURATION = Duration.ofMillis(100);
     private static final int EXECUTOR_SIZE = 20; // Runtime.getRuntime().availableProcessors(); // IO vs CPU blocking
     private static final int QUEUES_PER_EXECUTOR = 40;
@@ -43,7 +44,8 @@ public class ConcurrentKafkaConsumerTest {
     private static final Integer MAX_SLEEP_TIME = 300;
     private static final Integer MIN_SLEEP_TIME = 50;
     private static final Integer DEF_SLEEP_TIME = 300;
-    public static final int SUCCESS_PERCENTAGE_RATE = 94;
+    public static final int SUCCESS_PERCENTAGE_RATE = 95;
+    private static final Integer MAX_BLOCKED = 300;
 
     private static Map<String, ConcurrentPartitionConsumerConfig<String, String>> getDefaultConcurrentPartitionConsumerConfig(IConcurrentKafkaConsumer<String, String> recordConsumer) {
         ConcurrentPartitionConsumerConfig<String, String> concurrentPartitionConsumerConfig = new ConcurrentPartitionConsumerConfig<>(recordConsumer);
@@ -51,6 +53,8 @@ public class ConcurrentKafkaConsumerTest {
         concurrentPartitionConsumerConfig.setExecutorQueueSize(QUEUES_PER_EXECUTOR);
         concurrentPartitionConsumerConfig.setMaxBatchSize(MAX_BATCH_SIZE);
         concurrentPartitionConsumerConfig.setMaxRetryCount(MAX_RETRY_COUNT);
+        concurrentPartitionConsumerConfig.setMaxBlocked(MAX_BLOCKED);
+        concurrentPartitionConsumerConfig.setDeadLetterQueue(new InMemoryDeadLetterQueue<>());
 
         return new HashMap<>() {{
             put(TOPIC, concurrentPartitionConsumerConfig);
@@ -163,10 +167,11 @@ public class ConcurrentKafkaConsumerTest {
             }
 
             // this event can fail
-            int random = rand.nextInt(0, 100);
+            int random = rand.nextInt(1, 101);
             if (random > SUCCESS_PERCENTAGE_RATE) {
                 failedRecordRegistry.put(record.key(), record.value());
                 // throw new RuntimeException("I was unlucky, random is: " + random);
+                log.warn("["+record.key()+"] I lost database connection. Fail rate set to " + (100 - SUCCESS_PERCENTAGE_RATE) + "%! I got: "+random);
                 throw new ConcurrentKafkaConsumerException("I lost database connection. Fail rate set to " + (100 - SUCCESS_PERCENTAGE_RATE) + "%!", record);
             }
 

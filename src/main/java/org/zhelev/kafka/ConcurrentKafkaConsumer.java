@@ -80,12 +80,12 @@ public class ConcurrentKafkaConsumer<K, V> implements AutoCloseable, ConsumerReb
                                             log.warn(e.getMessage(), e);
                                         }
                                     }
-                                } catch (ConcurrentPartitionConsumerException cpex) {
-                                    log.error(cpex.getMessage(), cpex);
-                                    log.error("[{}] Error processing record {}", partitionKey, cpex.getFailedRecords());
-                                    log.error("[{}] Successfully processed records in this batch {}", partitionKey, cpex.getProcessedRecords().size());
+                                } catch (ConcurrentPartitionConsumerException concurrentPartitionConsumerException) {
+                                    log.error(concurrentPartitionConsumerException.getMessage(), concurrentPartitionConsumerException);
+                                    log.error("[{}] Error processing record {}", partitionKey, concurrentPartitionConsumerException.getDeadLetterQueue().size());
+                                    log.error("[{}] Successfully processed records in this batch {}", partitionKey, concurrentPartitionConsumerException.getProcessedRecords().size());
                                     log.error("[{}] Failed partition records count: {}", partitionKey,
-                                            (partitionRecords.size() - cpex.getProcessedRecords().size()));
+                                            (partitionRecords.size() - concurrentPartitionConsumerException.getProcessedRecords().size()));
                                     log.error("[{}] Last successfully commited offset: {}", partitionKey, lastCommittedOffsets.get(partitionKey));
                                     try {
                                         partitionConsumers.remove(partitionKey); // next iteration will create a new one
@@ -145,24 +145,24 @@ public class ConcurrentKafkaConsumer<K, V> implements AutoCloseable, ConsumerReb
             if (completionException.getCause() instanceof ConcurrentPartitionConsumerException) {
                 ConcurrentPartitionConsumerException cpex = (ConcurrentPartitionConsumerException) completionException.getCause();
                 String partitionKey = ConcurrentPartitionConsumer.getPartitionKey(cpex.getTopicPartition());
-                ConcurrentPartitionConsumer<K,V> concurrentPartitionConsumer = partitionConsumers.remove(partitionKey);
-                if(concurrentPartitionConsumer !=null){
+                ConcurrentPartitionConsumer<K, V> concurrentPartitionConsumer = partitionConsumers.remove(partitionKey);
+                if (concurrentPartitionConsumer != null) {
                     concurrentPartitionConsumer.close();
                 }
             } else {
                 throw completionException;
             }
-        }catch(ConcurrentPartitionConsumerException cpe){
+        } catch (ConcurrentPartitionConsumerException cpe) {
             try {
                 String partitionKey = ConcurrentPartitionConsumer.getPartitionKey(cpe.getTopicPartition());
-                ConcurrentPartitionConsumer<K,V> concurrentPartitionConsumer = partitionConsumers.remove(partitionKey);
-                if(concurrentPartitionConsumer !=null){
+                ConcurrentPartitionConsumer<K, V> concurrentPartitionConsumer = partitionConsumers.remove(partitionKey);
+                if (concurrentPartitionConsumer != null) {
                     concurrentPartitionConsumer.close();
                 }
             } catch (Exception e) {
                 log.warn(e.getMessage(), e);
             }
-        }catch (Exception e){
+        } catch (Exception e) {
             log.error(e.getMessage(), e);
         }
 
