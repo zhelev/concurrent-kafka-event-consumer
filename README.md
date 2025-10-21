@@ -1,5 +1,7 @@
 # concurrent-kafka-event-consumer
 
+If you are looking for a production ready parallel consumer, have a look at [parallel-consumer](https://github.com/confluentinc/parallel-consumer).
+
 !! WORK IN PROGRESS !!
 
 This project demonstrates how to create a concurrent Apache Kafka consumer.
